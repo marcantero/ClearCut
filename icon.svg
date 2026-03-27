@@ -1,17 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="100%" height="100%">
+  <rect x="0" y="0" width="120" height="120" fill="#2E2E2E" />
+  
   <defs>
     <clipPath id="cut-top-left">
-      <polygon points="-20,-20 140,-20 -20,140" />
+      <polygon points="0,0 120,0 0,120" />
     </clipPath>
-    
     <clipPath id="cut-bottom-right">
-      <polygon points="140,140 -20,140 140,-20" />
+      <polygon points="120,120 0,120 120,0" />
     </clipPath>
   </defs>
 
-  <rect x="20" y="20" width="60" height="60" rx="12" fill="#3D3D3D" clip-path="url(#cut-top-left)" />
+  <rect x="20" y="20" width="60" height="60" rx="12" fill="#FFFFFF" clip-path="url(#cut-top-left)" />
 
-  <rect x="40" y="40" width="60" height="60" rx="12" fill="none" stroke="#3D3D3D" stroke-width="8" clip-path="url(#cut-bottom-right)" />
+  <rect x="40" y="40" width="60" height="60" rx="12" fill="none" stroke="#FFFFFF" stroke-width="8" clip-path="url(#cut-bottom-right)" />
 
   <g transform="rotate(-45 60 60)">
     <rect x="0" y="56" width="120" height="8" fill="#00A8B5" />
