@@ -1,85 +1,130 @@
-import { pipeline } from '@xenova/transformers';
+import { pipeline, RawImage } from '@huggingface/transformers';
 
-// Types shared with main thread
-export type WorkerInitMessage = { type: 'init' };
-export type WorkerProcessMessage = {
-  type: 'process-image';
-  id: string;
-  imageData: ImageData;
-};
+// Re-export types for main thread to import
+export type {
+  WorkerInitMessage,
+  WorkerProcessMessage,
+  WorkerIncomingMessage,
+  WorkerStatusMessage,
+  WorkerModelProgressMessage,
+  WorkerResultMessage,
+  WorkerProcessingMessage,
+  WorkerErrorMessage,
+  WorkerOutgoingMessage,
+} from './backgroundRemover.types';
 
-export type WorkerIncomingMessage = WorkerInitMessage | WorkerProcessMessage;
+declare const self: Worker;
 
-export type WorkerStatusMessage = {
-  type: 'status';
-  status: 'loading-model' | 'ready' | 'error';
-  message?: string;
-};
+interface PostableMessage {
+  type: string;
+  [key: string]: any;
+}
 
-export type WorkerResultMessage = {
-  type: 'result';
-  id: string;
-  imageData: ImageData;
-};
-
-export type WorkerProcessingMessage = {
-  type: 'processing';
-  id: string;
-  status: 'started' | 'finished';
-};
-
-export type WorkerErrorMessage = {
-  type: 'error';
-  id?: string;
-  message: string;
-};
-
-export type WorkerOutgoingMessage =
-  | WorkerStatusMessage
-  | WorkerResultMessage
-  | WorkerProcessingMessage
-  | WorkerErrorMessage;
-
+let initialized = false;
 let segmenterPromise: Promise<any> | null = null;
 
 async function getSegmenter() {
   if (!segmenterPromise) {
-    // Notify main thread that we are loading the model
-    postMessage({
-      type: 'status',
-      status: 'loading-model',
-    } satisfies WorkerStatusMessage);
-
-    // NOTE: Model name chosen for background removal; adjust if needed.
-    segmenterPromise = pipeline('image-segmentation', 'briaai/RMBG-1.4');
-
-    try {
-      await segmenterPromise;
-      postMessage({
-        type: 'status',
-        status: 'ready',
-      } satisfies WorkerStatusMessage);
-    } catch (error: any) {
-      postMessage({
-        type: 'status',
-        status: 'error',
-        message: error?.message ?? 'Failed to load AI model',
-      } satisfies WorkerStatusMessage);
-      throw error;
-    }
+    segmenterPromise = pipeline('background-removal', 'Xenova/modnet', {
+      dtype: 'fp32',
+      progress_callback: (data: any) => {
+        if (data.status === 'progress') {
+          self.postMessage({
+            type: 'model-progress',
+            progress: Math.round(data.progress),
+            phase: data.file ? `Descargando: ${data.file}` : 'Preparando modelo...'
+          });
+        } else if (data.status === 'ready') {
+          self.postMessage({
+            type: 'model-progress',
+            progress: 100,
+            phase: 'Modelo cargado y listo'
+          });
+        }
+      }
+    });
   }
-
   return segmenterPromise;
 }
 
-self.onmessage = async (event: MessageEvent<WorkerIncomingMessage>) => {
+async function initBackgroundRemover(): Promise<void> {
+  if (initialized) {
+    return;
+  }
+
+  try {
+    self.postMessage({
+      type: 'status',
+      status: 'loading-model',
+      message: 'Initializing background removal model…',
+    });
+
+    await getSegmenter();
+
+    initialized = true;
+    self.postMessage({
+      type: 'status',
+      status: 'ready',
+      message: 'Background removal model ready.',
+    });
+  } catch (error: any) {
+    console.error('[Worker] Error during initialization:', error);
+    self.postMessage({
+      type: 'status',
+      status: 'error',
+      message: error?.message || 'Error during model initialization',
+    });
+  }
+}
+
+async function removeBackgroundWithModnet(imageData: ImageData): Promise<ImageData> {
+  const { width, height, data } = imageData;
+  const segmenter = await getSegmenter();
+  const imageToProcess = new RawImage(imageData.data, imageData.width, imageData.height, 4);
+  // Run local background-removal pipeline on the input ImageData
+  const outputs = await segmenter(imageToProcess);
+  
+  // Validación defensiva para la salida del modelo
+  const finalImage = Array.isArray(outputs) ? outputs[0] : outputs;
+
+  const resultBlob: Blob | null = await finalImage.toBlob();
+  if (!resultBlob) {
+    throw new Error('Failed to create result blob from MODNet output.');
+  }
+
+  // Convert resulting PNG (with alpha) back to ImageData
+  const bitmap = await createImageBitmap(resultBlob);
+  const outCanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  const outCtx = outCanvas.getContext('2d');
+  if (!outCtx) {
+    throw new Error('Failed to create 2D context for output canvas.');
+  }
+
+  // Draw the alpha-matted image and read back pixels
+  outCtx.drawImage(bitmap, 0, 0);
+  const outputImageData = outCtx.getImageData(0, 0, bitmap.width, bitmap.height);
+
+  return outputImageData;
+}
+
+self.onmessage = async (event: MessageEvent<PostableMessage>) => {
   const message = event.data;
+
+  if (message.type === 'reset') {
+    initialized = false;
+    return;
+  }
 
   if (message.type === 'init') {
     try {
-      await getSegmenter();
-    } catch {
-      // Error already reported via status message
+      await initBackgroundRemover();
+    } catch (error: any) {
+      console.error('[Worker] Error in init:', error);
+      self.postMessage({
+        type: 'status',
+        status: 'error',
+        message: error?.message || "S'ha produït un error en inicialitzar el model d'IA.",
+      });
     }
     return;
   }
@@ -87,56 +132,36 @@ self.onmessage = async (event: MessageEvent<WorkerIncomingMessage>) => {
   if (message.type === 'process-image') {
     const { id, imageData } = message;
 
-    postMessage({
+    self.postMessage({
       type: 'processing',
       id,
       status: 'started',
-    } satisfies WorkerProcessingMessage);
+    });
 
     try {
-      const segmenter = await getSegmenter();
+      await initBackgroundRemover();
 
-      // Run the model to warm up and perform segmentation.
-      // NOTE: For now we do not yet use the mask to modify the pixels; we
-      // just ensure the model runs entirely inside the worker. You can
-      // refine this later to apply the predicted mask and set background
-      // alpha to 0.
-      try {
-        // We ignore the returned mask for now but this still executes
-        // the AI pipeline in the worker.
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const _result = await segmenter(imageData as any);
-      } catch (inferenceError: any) {
-        postMessage({
-          type: 'error',
-          id,
-          message:
-            inferenceError?.message ?? 'Failed to run background removal',
-        } satisfies WorkerErrorMessage);
-        return;
-      }
+      // Única via possible: la IA. Si falla, saltarà directament al catch.
+      const output = await removeBackgroundWithModnet(imageData);
 
-      // Placeholder: currently we just return the original imageData. This
-      // keeps the pipeline and messaging architecture working; once you
-      // have validated the Transformers.js segmentation output shape you
-      // can apply the mask here to actually remove the background.
-      postMessage({
+      self.postMessage({
         type: 'result',
         id,
-        imageData,
-      } satisfies WorkerResultMessage);
+        imageData: output,
+      });
 
-      postMessage({
+      self.postMessage({
         type: 'processing',
         id,
         status: 'finished',
-      } satisfies WorkerProcessingMessage);
+      });
     } catch (error: any) {
-      postMessage({
+      console.error('[Worker] Error in process-image:', error);
+      self.postMessage({
         type: 'error',
         id,
-        message: error?.message ?? 'Unexpected error in worker',
-      } satisfies WorkerErrorMessage);
+        message: error?.message || "L'IA ha fallat en processar aquesta imatge.",
+      });
     }
   }
 };

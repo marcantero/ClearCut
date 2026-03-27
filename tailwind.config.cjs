@@ -8,6 +8,7 @@ module.exports = {
     extend: {
       fontFamily: {
         sans: [
+          'Manrope',
           'system-ui',
           '-apple-system',
           'BlinkMacSystemFont',
@@ -17,8 +18,8 @@ module.exports = {
       },
       colors: {
         brand: {
-          500: '#4f46e5',
-          600: '#4338ca',
+          500: '#22d3ee',
+          600: '#06b6d4',
         },
       },
     },
