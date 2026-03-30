@@ -1,4 +1,4 @@
-# 🪄 Frontend UI/UX: Experiencias Interactivas (Estilo Remove.bg)
+# 🪄 Frontend UI/UX: Experiencias Interactivas
 
 > **Diseño y desarrollo de interfaces fluidas, Drag & Drop avanzado y manejo de estados asíncronos para herramientas web de alto rendimiento.**
 
