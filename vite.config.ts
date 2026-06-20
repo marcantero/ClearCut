@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react-swc';
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  base: '/clearcut-ai-background-remover/',
   plugins: [react()],
   optimizeDeps: {
     // Transformers.js incluye código avanzado que no se lleva bien
