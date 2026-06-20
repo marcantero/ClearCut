@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Dropzone } from './components/Dropzone';
 import { ModelStatus, ModelStatusBanner } from './components/ModelStatusBanner';
 import { ImageCompareSlider } from './components/ImageCompareSlider';
+import { MaskEditorOverlay } from './components/MaskEditorOverlay';
 import {
 	fileToImageData,
 	imageDataToDataUrl,
@@ -40,6 +41,10 @@ function App() {
 	const [animationKey, setAnimationKey] = useState<string>('');
 	const latestRequestIdRef = useRef<string | null>(null);
 	const workerRef = useRef<Worker | null>(null);
+	const [aiResultImageData, setAiResultImageData] = useState<ImageData | null>(null);
+	const [originalImageData, setOriginalImageData] = useState<ImageData | null>(null);
+	const [refinedSrc, setRefinedSrc] = useState<string | null>(null);
+	const [isEditing, setIsEditing] = useState(false);
 
 	// Initialize and manage the background-removal worker
 	useEffect(() => {
@@ -92,6 +97,9 @@ function App() {
 				}
 
 				const url = imageDataToDataUrl(imageData);
+				setAiResultImageData(imageData);
+				setRefinedSrc(null);
+				setIsEditing(false);
 				setProcessedSrc((prev) => {
 					if (prev) URL.revokeObjectURL(prev);
 					return url;
@@ -123,9 +131,9 @@ function App() {
 				modelStatus: 'error',
 				processingStatus:
 					prev.processingStatus === 'processing' ? 'error' : prev.processingStatus,
-					errorMessage:
-						"S'ha produït un error intern al worker d'IA. Recarrega la pàgina i torna-ho a provar.",
-					modelMessage: event.message,
+				errorMessage:
+					"An internal AI worker error occurred. Please reload the page and try again.",
+				modelMessage: event.message,
 			}));
 		};
 
@@ -183,6 +191,7 @@ function App() {
 			const { imageData, dataUrl } = await fileToImageData(file, 1024);
 
 			setOriginalSrc(dataUrl);
+			setOriginalImageData(imageData);
 			setProcessedSrc(null);
 			setAnimationKey('');
 
@@ -217,14 +226,15 @@ function App() {
 	};
 
 	const onDownload = async () => {
-		if (!processedSrc) return;
+		const srcToDownload = refinedSrc ?? processedSrc;
+		if (!srcToDownload) return;
 
 		try {
 			const img = await new Promise<HTMLImageElement>((resolve, reject) => {
 				const image = new Image();
 				image.onload = () => resolve(image);
 				image.onerror = (err) => reject(err);
-				image.src = processedSrc;
+				image.src = srcToDownload;
 			});
 
 			const canvas = document.createElement('canvas');
@@ -248,7 +258,23 @@ function App() {
 		}
 	};
 
+	const onRefined = useCallback((refined: ImageData) => {
+		const url = imageDataToDataUrl(refined);
+		setRefinedSrc((prev) => {
+			if (prev) URL.revokeObjectURL(prev);
+			return url;
+		});
+		// We also update processedSrc so the download and preview use the corrected version
+		setProcessedSrc((prev) => {
+			if (prev) URL.revokeObjectURL(prev);
+			return url;
+		});
+	}, []);
+
 	const isProcessing = state.processingStatus === 'processing';
+
+	// The src shown in the compare slider: prefer refined version if it exists
+	const displaySrc = refinedSrc ?? processedSrc;
 
 	return (
 		<div className="min-h-screen bg-slate-950 text-slate-50">
@@ -344,7 +370,7 @@ function App() {
 										<div className="flex items-center gap-2">
 											<span className="font-medium uppercase tracking-[0.16em]">2 · Preview</span>
 										</div>
-										{state.processingStatus === 'done' && processedSrc && (
+										{state.processingStatus === 'done' && displaySrc && (
 											<span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-200/90">
 												Done
 											</span>
@@ -365,15 +391,35 @@ function App() {
 										</div>
 									)}
 
-									{originalSrc && processedSrc && (
+									{originalSrc && displaySrc && !isEditing && (
 										<ImageCompareSlider
 											originalSrc={originalSrc}
-											processedSrc={processedSrc}
+											processedSrc={displaySrc}
 											animationKey={animationKey}
 										/>
 									)}
 
-									{originalSrc && !processedSrc && (
+									{originalSrc && displaySrc && aiResultImageData && originalImageData && (
+										<div className="mt-3 space-y-3">
+											<button
+												type="button"
+												onClick={() => setIsEditing((v) => !v)}
+												className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-cyan-500/40 hover:text-cyan-300"
+											>
+												<span>{isEditing ? '✕ Close editor' : '✦ Refine edges'}</span>
+											</button>
+
+											{isEditing && (
+												<MaskEditorOverlay
+													originalImageData={originalImageData}
+													aiResultImageData={aiResultImageData}
+													onRefined={onRefined}
+												/>
+											)}
+										</div>
+									)}
+
+									{originalSrc && !displaySrc && (
 										<div className="relative flex h-64 items-center justify-center overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-950/70 text-xs text-slate-400">
 											<div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(34,211,238,0.16),transparent_55%),radial-gradient(circle_at_bottom,_rgba(15,23,42,0.9),transparent_60%)] opacity-70" />
 											<div className="relative flex flex-col items-center gap-2">
@@ -389,7 +435,7 @@ function App() {
 										<button
 											type="button"
 											onClick={onDownload}
-											disabled={state.processingStatus !== 'done' || !processedSrc}
+											disabled={state.processingStatus !== 'done' || !displaySrc}
 											className="inline-flex items-center gap-2 rounded-full bg-cyan-400 px-4 py-2 text-xs font-medium text-slate-950 shadow-[0_10px_40px_rgba(8,47,73,0.9)] transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-300"
 										>
 											<span className="text-sm">⬇</span>

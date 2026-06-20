@@ -40,3 +40,5 @@ coverage/
 # Temporary files
 .tmp/
 .temp/
+/clearcut-training
+/venv
