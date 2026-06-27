@@ -2,18 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
-html,
-body,
-#root {
-  height: 100%;
-}
+html, body, #root { height: 100%; }
 
 body {
-  @apply bg-[#060a10] text-slate-50 antialiased;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  @apply bg-slate-50 text-slate-900 dark:bg-[#060a10] dark:text-slate-50 antialiased transition-colors duration-300;
+  font-family: 'Manrope', system-ui, -apple-system, sans-serif;
 }
 
-/* Subtle noise grain on top of the background — adds depth without adding color */
 body::before {
   content: '';
   position: fixed;
@@ -24,8 +19,8 @@ body::before {
   background-size: 128px 128px;
 }
 
-/* Ambient glow — two focal points, very subtle */
-body::after {
+/* El glow NOMÉS s'activa en mode fosc */
+.dark body::after {
   content: '';
   position: fixed;
   inset: 0;
@@ -36,31 +31,11 @@ body::after {
     radial-gradient(ellipse 50% 35% at 80% 80%, rgba(45, 212, 191, 0.05) 0%, transparent 70%);
 }
 
-/* All real content must sit above the pseudo-elements */
 #root {
   position: relative;
   z-index: 1;
 }
 
-@keyframes fade-in {
-  from { opacity: 0; transform: translateY(3px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes fade-up {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-/* Canvas inside the editor: object-fit contain via CSS so it scales within its container */
 .editor-canvas-container canvas {
   object-fit: contain;
-}
-
-/* Reduced motion */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
-  }
 }
