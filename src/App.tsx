@@ -25,6 +25,19 @@ function App() {
     localStorage.setItem('clearcut-theme', next);
   };
 
+
+  const mousePos = useRef({ x: 0, y: 0 });
+  const blobRef = useRef<HTMLDivElement>(null);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+  mousePos.current = { x: e.clientX, y: e.clientY };
+	
+  if (blobRef.current) {
+		// Apliquem la transformació directament al DOM per evitar re-renders constants
+		blobRef.current.style.transform = `translate(${mousePos.current.x - 200}px, ${mousePos.current.y - 200}px)`;
+  }
+  }, []);
+
   const [originalSrc, setOriginalSrc] = useState<string | null>(null);
   const [processedSrc, setProcessedSrc] = useState<string | null>(null);
   const [animationKey, setAnimationKey] = useState<string>('');
@@ -97,9 +110,23 @@ function App() {
   const displaySrc = refinedSrc ?? processedSrc;
   const canEdit = !!(originalSrc && displaySrc && aiResultImageData && originalImageData);
 
-  return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-[#060a10] dark:text-slate-50 flex flex-col antialiased transition-colors duration-300">
-
+	return (
+		<div 
+		className="relative min-h-screen w-full overflow-x-hidden text-slate-900 dark:text-slate-50 antialiased transition-colors duration-300"
+		onMouseMove={handleMouseMove}
+		>
+		<div className="fixed inset-0 -z-10 bg-[#060a10] overflow-hidden">
+		<div 
+			ref={blobRef}
+			className="pointer-events-none fixed h-96 w-96 rounded-full bg-cyan-500/10 blur-[128px] will-change-transform"
+			style={{ transition: 'transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1)' }}
+		/>
+		
+		{/* Resta de bombolles (les animades) */}
+		<div className="absolute -top-[10%] -left-[10%] h-[600px] w-[600px] rounded-full bg-cyan-500/10 blur-[128px] animate-drift" />
+		<div className="absolute top-[20%] -right-[10%] h-[500px] w-[500px] rounded-full bg-teal-500/10 blur-[128px] animate-swirl [animation-delay:-7s]" />
+		<div className="absolute -bottom-[10%] left-[20%] h-[400px] w-[400px] rounded-full bg-indigo-500/10 blur-[128px] animate-breathe [animation-delay:-4s]" />
+		</div>
       {/* ── Header ───────────────────────────────────────────────────────── */}
       <header
         className={`sticky top-0 z-30 flex items-center justify-between px-5 sm:px-8 transition-all duration-500 ease-out ${
@@ -108,21 +135,21 @@ function App() {
             : 'py-4 bg-transparent'
         }`}
       >
-        <div className="flex items-center gap-3">
-          <div className="relative flex h-8 w-8 items-center justify-center">
-            <div className="absolute inset-0 rounded-xl bg-gradient-to-br from-cyan-400 to-teal-500 opacity-90" />
-            <div className="absolute inset-0 rounded-xl ring-1 ring-black/10 dark:ring-white/10" />
-            <svg className="relative" width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M3 8.5C3 5.46 5.46 3 8.5 3S14 5.46 14 8.5" stroke="#0a0f1a" strokeWidth="2" strokeLinecap="round"/>
-              <path d="M5.5 11C5.5 9.62 6.62 8.5 8 8.5s2.5 1.12 2.5 2.5" stroke="#0a0f1a" strokeWidth="2" strokeLinecap="round"/>
-              <circle cx="8" cy="13" r="1.25" fill="#0a0f1a"/>
-            </svg>
-          </div>
-          <div>
-            <span className="text-sm font-semibold tracking-tight text-slate-900 dark:text-white">ClearCut</span>
-            <span className="ml-2 hidden text-[11px] text-slate-500 sm:inline">Background remover</span>
-          </div>
-        </div>
+		<div className="flex items-center gap-3">
+		{/* LOGO DEFINITIU */}
+		<div className="relative flex h-8 w-8 items-center justify-center">
+			<img 
+			src="/favicon.svg" 
+			alt="ClearCut Logo" 
+			className="w-full h-full object-contain" 
+			/>
+		</div>
+		
+		<div>
+			<span className="text-sm font-semibold tracking-tight text-slate-900 dark:text-white">ClearCut</span>
+			<span className="ml-2 hidden text-[11px] text-slate-500 sm:inline">Background remover</span>
+		</div>
+		</div>
 
         <div className="flex items-center gap-2.5">
 			
