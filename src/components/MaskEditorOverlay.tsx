@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect, useCallback, useLayoutEffect } from 'react';
 import { useMaskEditor, BrushMode } from '../lib/useMaskEditor';
+import { useSmartBrush } from '../lib/useSmartBrush';
 import { refineMask } from '../lib/refineMask';
 
 interface MaskEditorOverlayProps {
@@ -8,112 +9,212 @@ interface MaskEditorOverlayProps {
   onRefined: (refined: ImageData) => void;
 }
 
+type ActiveTool = 'brush' | 'smart';
+
 const BRUSH_SIZES = [8, 16, 32, 56, 80];
+const TOLERANCE_PRESETS = [
+  { label: 'Exact',  value: 8   },
+  { label: 'Low',    value: 25  },
+  { label: 'Med',    value: 55  },
+  { label: 'High',   value: 90  },
+  { label: 'Max',    value: 140 },
+] as const;
 
 export function MaskEditorOverlay({
   originalImageData,
   aiResultImageData,
   onRefined,
 }: MaskEditorOverlayProps) {
-  const [brushSize, setBrushSize] = useState(24);
-  const [brushMode, setBrushMode] = useState<BrushMode>('restore');
+  const [brushSize,  setBrushSize]  = useState(32);
+  const [brushMode,  setBrushMode]  = useState<BrushMode>('restore');
+  const [activeTool, setActiveTool] = useState<ActiveTool>('brush');
+  const [tolerance,  setTolerance]  = useState(55);
 
-  // Main canvas displaying the refined result in real-time
   const displayCanvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  // Ref to access getCorrectionMask inside the onStroke callback
   const getCorrectionMaskRef = useRef<(() => ImageData | null) | null>(null);
-  // Ref to prevent onStroke from capturing an old closure of onRefined
   const onRefinedRef = useRef(onRefined);
   useLayoutEffect(() => { onRefinedRef.current = onRefined; }, [onRefined]);
 
-  // Draws the current result on the display canvas
+  // Per al smart brush: globalVisited es crea en onPointerDown i dura fins onPointerUp
+  const strokeVisitedRef = useRef<Uint8Array | null>(null);
+  // Throttle: nombre de frames acumulats sense disparar refineMask
+  const pendingFrameRef  = useRef<number | null>(null);
+
   const drawResultOnDisplay = useCallback((result: ImageData) => {
     const canvas = displayCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
     canvas.width  = result.width;
     canvas.height = result.height;
-
-    // Dark checkerboard to visualize transparency
     const TILE = 16;
-    for (let y = 0; y < canvas.height; y += TILE) {
+    for (let y = 0; y < canvas.height; y += TILE)
       for (let x = 0; x < canvas.width; x += TILE) {
         ctx.fillStyle = (x / TILE + y / TILE) % 2 === 0 ? '#334155' : '#1e293b';
         ctx.fillRect(x, y, TILE, TILE);
       }
-    }
     ctx.putImageData(result, 0, 0);
   }, []);
 
-  // Initial draw when AI result arrives
   useEffect(() => {
-    // Resize the overlay canvas when the image changes
     if (overlayCanvasRef.current) {
-      overlayCanvasRef.current.width = aiResultImageData.width;
+      overlayCanvasRef.current.width  = aiResultImageData.width;
       overlayCanvasRef.current.height = aiResultImageData.height;
-      console.log('[MaskEditorOverlay] overlay canvas resized to:', aiResultImageData.width, 'x', aiResultImageData.height);
     }
-    
     drawResultOnDisplay(aiResultImageData);
-    
-    // Initialize the overlay canvas with a test stroke to verify it works
-    const oCanvas = overlayCanvasRef.current;
-    if (oCanvas) {
-      const oCtx = oCanvas.getContext('2d');
-      if (oCtx) {
-        // Draw a test line to see that the canvas works
-        oCtx.strokeStyle = 'rgba(100,100,100,0.3)';
-        oCtx.lineWidth = 2;
-        oCtx.setLineDash([5, 5]);
-        oCtx.strokeRect(0, 0, oCanvas.width, oCanvas.height);
-        console.log('[MaskEditorOverlay] canvas overlay initialized with border');
-      }
-    }
   }, [aiResultImageData, drawResultOnDisplay]);
 
-  // Callback called on each stroke segment → applies refineMask and updates display
-  const handleStroke = useCallback(() => {
-    console.log('[MaskEditorOverlay] handleStroke called');
+  // ── refineMask + notificació al pare ──────────────────────────────────────
+  const applyRefinement = useCallback(() => {
     const correctionMask = getCorrectionMaskRef.current?.();
-    if (!correctionMask) {
-      console.warn('[MaskEditorOverlay] correctionMask is null');
-      return;
-    }
-
-    console.log('[MaskEditorOverlay] refineMask called, aiResultImageData:', aiResultImageData?.width, 'x', aiResultImageData?.height);
+    if (!correctionMask) return;
     const refined = refineMask(aiResultImageData, originalImageData, correctionMask);
-    console.log('[MaskEditorOverlay] refineMask returned:', refined?.width, 'x', refined?.height);
-
-    // Update the display canvas in real-time
     drawResultOnDisplay(refined);
-
-    // Notify parent (update processedSrc for download)
     onRefinedRef.current(refined);
   }, [aiResultImageData, originalImageData, drawResultOnDisplay]);
 
+  // Callback per al pinzell normal (dispara en cada segment, ja era així)
+  const handleBrushStroke = useCallback(() => {
+    applyRefinement();
+  }, [applyRefinement]);
+
+  // ── useMaskEditor (pinzell clàssic) ───────────────────────────────────────
   const {
     canvasRef: overlayCanvasRef,
     hasEdits,
-    onPointerDown,
-    onPointerMove,
-    onPointerUp,
-    onPointerLeave,
+    onPointerDown:  brushPointerDown,
+    onPointerMove:  brushPointerMove,
+    onPointerUp:    brushPointerUp,
+    onPointerLeave: brushPointerLeave,
     getCorrectionMask,
     clearEdits,
+    getHiddenCanvases,
+    notifyExternalEdit,
   } = useMaskEditor({
-    width: aiResultImageData.width,
-    height: aiResultImageData.height,
+    width:    aiResultImageData.width,
+    height:   aiResultImageData.height,
     brushSize,
     brushMode,
-    onStroke: handleStroke,
+    onStroke: activeTool === 'brush' ? handleBrushStroke : undefined,
   });
 
   useLayoutEffect(() => {
     getCorrectionMaskRef.current = getCorrectionMask;
   }, [getCorrectionMask]);
+
+  // ── useSmartBrush (pinzell intel·ligent) ──────────────────────────────────
+  const { fillAt, createStrokeState, getScaledPos } = useSmartBrush();
+
+  // Throttle del refineMask per al smart brush:
+  // acumula fills a cada onPointerMove, però refineMask es dispara
+  // en el proper rAF (màxim 60 vegades/s), no en cada píxel
+  const scheduleRefinement = useCallback(() => {
+    if (pendingFrameRef.current !== null) return; // ja programat
+    pendingFrameRef.current = requestAnimationFrame(() => {
+      pendingFrameRef.current = null;
+      applyRefinement();
+    });
+  }, [applyRefinement]);
+
+  const smartPointerDown = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      const canvas = overlayCanvasRef.current;
+      if (!canvas) return;
+
+      // Crear globalVisited per a aquest stroke
+      strokeVisitedRef.current = createStrokeState(
+        aiResultImageData.width,
+        aiResultImageData.height,
+      );
+
+      const pos = getScaledPos(e, canvas);
+      const { restoreCanvas, eraseCanvas } = getHiddenCanvases();
+      const maskCanvas = brushMode === 'restore' ? restoreCanvas : eraseCanvas;
+      if (!maskCanvas) return;
+
+      fillAt(
+        originalImageData,   // mostreig des de la imatge original (té RGB reals)
+        maskCanvas,
+        canvas,
+        pos.x, pos.y,
+        brushSize,           // radi espacial = brushSize de la UI
+        tolerance,
+        brushMode,
+        strokeVisitedRef.current,
+      );
+
+      notifyExternalEdit();
+      scheduleRefinement();
+    },
+    [
+      overlayCanvasRef, createStrokeState, aiResultImageData,
+      getScaledPos, getHiddenCanvases, brushMode, fillAt,
+      originalImageData, brushSize, tolerance,
+      notifyExternalEdit, scheduleRefinement,
+    ],
+  );
+
+  const smartPointerMove = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (!strokeVisitedRef.current) return; // no estem dibuixant
+      const canvas = overlayCanvasRef.current;
+      if (!canvas) return;
+
+      const pos = getScaledPos(e, canvas);
+      const { restoreCanvas, eraseCanvas } = getHiddenCanvases();
+      const maskCanvas = brushMode === 'restore' ? restoreCanvas : eraseCanvas;
+      if (!maskCanvas) return;
+
+      fillAt(
+        originalImageData,
+        maskCanvas,
+        canvas,
+        pos.x, pos.y,
+        brushSize,
+        tolerance,
+        brushMode,
+        strokeVisitedRef.current,
+      );
+
+      notifyExternalEdit();
+      scheduleRefinement();
+    },
+    [
+      overlayCanvasRef, getScaledPos, getHiddenCanvases, brushMode,
+      fillAt, originalImageData, brushSize, tolerance,
+      notifyExternalEdit, scheduleRefinement,
+    ],
+  );
+
+  const smartPointerUp = useCallback(() => {
+    strokeVisitedRef.current = null;
+    // Garantir que el darrer frame de refinament s'aplica
+    if (pendingFrameRef.current !== null) {
+      cancelAnimationFrame(pendingFrameRef.current);
+      pendingFrameRef.current = null;
+    }
+    applyRefinement();
+  }, [applyRefinement]);
+
+  const smartPointerLeave = useCallback(() => {
+    strokeVisitedRef.current = null;
+  }, []);
+
+  // ── Routing d'events al canvas ────────────────────────────────────────────
+  const canvasProps =
+    activeTool === 'brush'
+      ? {
+          onMouseDown:  brushPointerDown,
+          onMouseMove:  brushPointerMove,
+          onMouseUp:    brushPointerUp,
+          onMouseLeave: brushPointerLeave,
+        }
+      : {
+          onMouseDown:  smartPointerDown,
+          onMouseMove:  smartPointerMove,
+          onMouseUp:    smartPointerUp,
+          onMouseLeave: smartPointerLeave,
+        };
 
   const handleClear = () => {
     clearEdits();
@@ -121,19 +222,30 @@ export function MaskEditorOverlay({
     onRefinedRef.current(aiResultImageData);
   };
 
-  // Cursor SVG dinàmic
-  const cursorSize  = Math.max(16, Math.min(72, brushSize));
-  const half        = cursorSize / 2;
-  const color       = brushMode === 'restore' ? 'white' : '%23f87171';
-  const fillOpacity = brushMode === 'restore' ? '0.12' : '0.10';
-  const cursorSvg   = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${cursorSize}' height='${cursorSize}'%3E%3Ccircle cx='${half}' cy='${half}' r='${half - 1}' stroke='${color}' stroke-width='1.5' fill='${color}' fill-opacity='${fillOpacity}'/%3E%3C/svg%3E`;
-  const cursorStyle = `url("${cursorSvg}") ${half} ${half}, crosshair`;
+  // ── Cursors ───────────────────────────────────────────────────────────────
+  const getCursor = (): string => {
+    const sz   = Math.max(16, Math.min(96, brushSize * 2));
+    const half = sz / 2;
+
+    if (activeTool === 'brush') {
+      const col = brushMode === 'restore' ? 'white' : '%23f87171';
+      const fop = brushMode === 'restore' ? '0.12'  : '0.10';
+      const svg = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${sz}' height='${sz}'%3E%3Ccircle cx='${half}' cy='${half}' r='${half - 1}' stroke='${col}' stroke-width='1.5' fill='${col}' fill-opacity='${fop}'/%3E%3C/svg%3E`;
+      return `url("${svg}") ${half} ${half}, crosshair`;
+    }
+
+    // Smart brush: cercle sòlid amb creu central
+    const col = brushMode === 'restore' ? '%2334d399' : '%23f87171';
+    const svg = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${sz}' height='${sz}'%3E%3Ccircle cx='${half}' cy='${half}' r='${half - 1}' stroke='${col}' stroke-width='2' stroke-dasharray='4 3' fill='${col}' fill-opacity='0.08'/%3E%3Cline x1='${half}' y1='${half - 4}' x2='${half}' y2='${half + 4}' stroke='${col}' stroke-width='1.5'/%3E%3Cline x1='${half - 4}' y1='${half}' x2='${half + 4}' y2='${half}' stroke='${col}' stroke-width='1.5'/%3E%3C/svg%3E`;
+    return `url("${svg}") ${half} ${half}, crosshair`;
+  };
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Toolbar */}
+      {/* ── Toolbar ──────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-800/80 bg-slate-900/70 px-4 py-2.5 text-xs backdrop-blur">
-        {/* Mode toggle */}
+
+        {/* Restore / Erase */}
         <div className="flex items-center gap-1 rounded-xl border border-slate-700/60 bg-slate-950/60 p-1">
           <button
             type="button"
@@ -159,6 +271,41 @@ export function MaskEditorOverlay({
           </button>
         </div>
 
+        {/* Brush / Smart */}
+        <div className="flex items-center gap-1 rounded-xl border border-slate-700/60 bg-slate-950/60 p-1">
+          <button
+            type="button"
+            onClick={() => setActiveTool('brush')}
+            title="Pinzell lliure"
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-medium transition-all ${
+              activeTool === 'brush'
+                ? 'bg-cyan-500/20 text-cyan-200 shadow-inner'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+            </svg>
+            Brush
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTool('smart')}
+            title="Pinzell intel·ligent — selecciona per color"
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-medium transition-all ${
+              activeTool === 'smart'
+                ? 'bg-cyan-500/20 text-cyan-200 shadow-inner'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            {/* Spark / magic wand icon */}
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275Z"/>
+            </svg>
+            Smart
+          </button>
+        </div>
+
         {/* Brush size */}
         <div className="flex items-center gap-2 text-slate-400">
           <span className="text-[10px] uppercase tracking-wider">Size</span>
@@ -176,17 +323,38 @@ export function MaskEditorOverlay({
                 style={{ width: 28, height: 28 }}
                 title={`${size}px`}
               >
-                <span
-                  className="rounded-full bg-current"
-                  style={{
-                    width:  Math.max(4, Math.min(16, size / 5)),
-                    height: Math.max(4, Math.min(16, size / 5)),
-                  }}
-                />
+                <span className="rounded-full bg-current" style={{
+                  width:  Math.max(4, Math.min(16, size / 5)),
+                  height: Math.max(4, Math.min(16, size / 5)),
+                }} />
               </button>
             ))}
           </div>
         </div>
+
+        {/* Tolerance — only in smart mode */}
+        {activeTool === 'smart' && (
+          <div className="flex items-center gap-2 text-slate-400">
+            <span className="text-[10px] uppercase tracking-wider">Tolerance</span>
+            <div className="flex items-center gap-1">
+              {TOLERANCE_PRESETS.map(({ label, value }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setTolerance(value)}
+                  title={`RGB distance ≤ ${value}`}
+                  className={`rounded-lg px-2.5 py-1 text-[10px] font-medium transition-all ${
+                    tolerance === value
+                      ? 'bg-cyan-400/15 text-cyan-200 border border-cyan-400/60'
+                      : 'border border-transparent text-slate-500 hover:text-slate-300 hover:border-slate-700'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {hasEdits && (
           <button
@@ -199,49 +367,37 @@ export function MaskEditorOverlay({
         )}
       </div>
 
-      {/* Canvas stack */}
+      {/* ── Canvas stack ─────────────────────────────────────────────────── */}
       <div
         className="relative overflow-hidden rounded-2xl border border-slate-800/60 shadow-[0_16px_60px_rgba(0,0,0,0.8)]"
         style={{ touchAction: 'none' }}
       >
-        {/* Layer 1: refined result (updated in real-time) */}
-        <canvas
-          ref={displayCanvasRef}
-          className="block w-full"
-        />
+        <canvas ref={displayCanvasRef} className="block w-full" />
 
-        {/* Layer 2: user painting overlay (green/transparent) */}
         <canvas
           ref={overlayCanvasRef}
           className="absolute inset-0 w-full h-full"
-          style={{ cursor: cursorStyle, touchAction: 'none' }}
-          onMouseDown={onPointerDown}
-          onMouseMove={onPointerMove}
-          onMouseUp={onPointerUp}
-          onMouseLeave={onPointerLeave}
+          style={{ cursor: getCursor(), touchAction: 'none' }}
+          {...canvasProps}
         />
 
         {/* Mode badge */}
         <div className="pointer-events-none absolute bottom-3 right-3">
-          <span
-            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-medium backdrop-blur-sm transition-all ${
-              brushMode === 'restore'
-                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-                : 'border-rose-500/30 bg-rose-500/10 text-rose-300'
-            }`}
-          >
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${
-                brushMode === 'restore' ? 'bg-emerald-400' : 'bg-rose-400'
-              }`}
-            />
-            {brushMode === 'restore' ? "Restoring from original" : 'Erasing area'}
+          <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-medium backdrop-blur-sm transition-all ${
+            brushMode === 'restore'
+              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+              : 'border-rose-500/30 bg-rose-500/10 text-rose-300'
+          }`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${brushMode === 'restore' ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+            {brushMode === 'restore' ? 'Restoring from original' : 'Erasing area'}
           </span>
         </div>
       </div>
 
       <p className="text-center text-[10px] text-slate-500">
-        Restore recovers pixels from the original image · Erase removes areas from the AI result
+        {activeTool === 'brush'
+          ? 'Restore recovers pixels from the original · Erase removes areas from the AI result'
+          : 'Smart brush selects similar colours as you paint · adjust tolerance for finer or broader edges'}
       </p>
     </div>
   );
