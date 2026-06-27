@@ -274,22 +274,31 @@ function App() {
 
             {originalSrc && (
               <section className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                    {isProcessing ? (
-                      <span className="inline-flex items-center gap-2">
-                        <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-500 dark:bg-cyan-400" />
-                        Removing background…
-                      </span>
-                    ) : isDone ? 'Done' : ''}
-                  </p>
-                  {isDone && displaySrc && (
-                    <button type="button" onClick={onDownload} className="inline-flex items-center gap-1.5 rounded-full bg-cyan-400 px-3.5 py-1.5 text-[11px] font-semibold text-slate-950 hover:bg-cyan-300 active:scale-95 transition">
-                      Download PNG
-                    </button>
-                  )}
-                </div>
-
+                {/* ── Substitueix el contenidor <div className="flex items-center justify-between">... fins al tancament de la secció de botó ── */}
+				<div className="flex items-center justify-between">
+				<p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+					{isProcessing ? (
+					<span className="inline-flex items-center gap-2">
+						<span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-500 dark:bg-cyan-400" />
+						Removing background…
+					</span>
+					) : null}
+				</p>
+				
+				{isDone && displaySrc && (
+					<button 
+					type="button" 
+					onClick={onDownload} 
+					className="group relative inline-flex items-center gap-2 overflow-hidden rounded-full bg-cyan-500 px-6 py-2.5 text-sm font-bold text-slate-950 transition-all hover:scale-[1.02] hover:bg-cyan-400 hover:shadow-[0_0_20px_-5px_rgba(34,211,238,0.5)] active:scale-[0.98]"
+					>
+					{/* Icona de descàrrega */}
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+						<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+					</svg>
+					Download Result
+					</button>
+				)}
+				</div>
                 {displaySrc ? (
                   <div className="overflow-hidden rounded-2xl ring-1 ring-slate-200 dark:ring-white/10 shadow-md dark:shadow-none">
                     <ImageCompareSlider originalSrc={originalSrc} processedSrc={displaySrc} animationKey={animationKey} />
