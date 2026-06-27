@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Toaster, sileo } from 'sileo';
 import { Dropzone } from './components/Dropzone';
 import { ImageCompareSlider } from './components/ImageCompareSlider';
@@ -8,25 +8,9 @@ import {
   imageDataToDataUrl,
   imageDataToPngBlob,
 } from './lib/imageUtils';
-import BackgroundRemoverWorker from './workers/backgroundRemover.worker?worker';
-import type {
-  WorkerIncomingMessage,
-  WorkerOutgoingMessage,
-  WorkerResultMessage,
-  WorkerStatusMessage,
-} from './workers/backgroundRemover.types';
-
-type UploadStatus = 'idle' | 'uploading' | 'loaded';
-type ProcessingStatus = 'idle' | 'processing' | 'done' | 'error';
-
-type WorkerState = {
-  modelStatus: 'idle' | 'loading' | 'ready' | 'error';
-  uploadStatus: UploadStatus;
-  processingStatus: ProcessingStatus;
-};
+import { useBackgroundWorker } from './hooks/useBackgroundWorker';
 
 function App() {
-  // ── Gestió de Tema (Clar / Fosc) ──────────────────────────────────────────
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof document !== 'undefined') {
       return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
@@ -35,164 +19,32 @@ function App() {
   });
 
   const toggleTheme = () => {
-    const next = theme === "dark" ? "light" : "dark";
+    const next = theme === 'dark' ? 'light' : 'dark';
     setTheme(next);
-    document.documentElement.classList.toggle("dark", next === "dark");
-    localStorage.setItem("clearcut-theme", next);
+    document.documentElement.classList.toggle('dark', next === 'dark');
+    localStorage.setItem('clearcut-theme', next);
   };
-
-  const [state, setState] = useState<WorkerState>({
-    modelStatus: 'idle',
-    uploadStatus: 'idle',
-    processingStatus: 'idle',
-  });
 
   const [originalSrc, setOriginalSrc] = useState<string | null>(null);
   const [processedSrc, setProcessedSrc] = useState<string | null>(null);
   const [animationKey, setAnimationKey] = useState<string>('');
-  
-  const workerRef = useRef<Worker | null>(null);
-  const latestRequestIdRef = useRef<string | null>(null);
-  const TOAST_MODEL_ID = 'clear-cut-model-loader';
-
   const [aiResultImageData, setAiResultImageData] = useState<ImageData | null>(null);
   const [originalImageData, setOriginalImageData] = useState<ImageData | null>(null);
   const [refinedSrc, setRefinedSrc] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
 
-  // ── 1. Inicialització de la IA i Animació Dinàmica a la Notificació ──────────
-  useEffect(() => {
-    const worker = new BackgroundRemoverWorker();
-    workerRef.current = worker;
+  const latestRequestIdRef = useRef<string | null>(null);
 
-    // Micro-timeout per assegurar que el portal de Sileo està muntat al DOM
-    setTimeout(() => {
-      sileo.info({
-        id: TOAST_MODEL_ID,
-        title: 'Initializing AI',
-        description: (
-          <div className="mt-2 w-full min-w-[240px] space-y-1.5">
-            <div className="flex justify-between text-[10px] text-slate-500 dark:text-slate-400">
-              <span>Connecting to local environment…</span>
-              <span className="font-mono font-medium">0%</span>
-            </div>
-            <div className="h-1 w-full bg-slate-100 dark:bg-white/10 rounded-full overflow-hidden">
-              <div className="h-full w-0 bg-cyan-500 dark:bg-cyan-400 rounded-full transition-all duration-300" />
-            </div>
-          </div>
-        ),
-        duration: Infinity,
-      });
-    }, 40);
-
-    const handleMessage = (event: MessageEvent<WorkerOutgoingMessage>) => {
-      const message = event.data;
-
-      if (message.type === 'status') {
-        const { status, message: text } = message as WorkerStatusMessage;
-        if (status === 'ready') {
-          setState((prev) => ({ ...prev, modelStatus: 'ready' }));
-          sileo.success({
-            id: TOAST_MODEL_ID,
-            title: 'AI Ready',
-            description: 'Everything runs locally in your browser.',
-            duration: 4000
-          });
-        } else if (status === 'error') {
-          setState((prev) => ({ ...prev, modelStatus: 'error' }));
-          sileo.error({
-            id: TOAST_MODEL_ID,
-            title: 'Unable to load AI',
-            description: text ?? 'An error occurred during startup.',
-            duration: 5000
-          });
-        }
-        return;
-      }
-
-      if (message.type === 'model-progress') {
-        setState((prev) => ({ ...prev, modelStatus: 'loading' }));
-        const percentage = Math.round(message.progress);
-        const phaseName = message.phase ?? 'Downloading weights…';
-
-        // Injectem la barra de càrrega animada i estilitzada directament al toast
-        sileo.info({
-          id: TOAST_MODEL_ID,
-          title: 'Initializing AI',
-          description: (
-            <div className="mt-2 w-full min-w-[240px] space-y-1.5">
-              <div className="flex justify-between text-[10px] tracking-tight">
-                <span className="truncate max-w-[170px] text-slate-500 dark:text-slate-400 font-medium">{phaseName}</span>
-                <span className="font-mono font-semibold text-cyan-600 dark:text-cyan-400">{percentage}%</span>
-              </div>
-              <div className="h-1 w-full bg-slate-200/70 dark:bg-white/10 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-gradient-to-r from-cyan-500 to-teal-500 dark:from-cyan-400 dark:to-teal-400 rounded-full transition-all duration-300 ease-out"
-                  style={{ width: `${percentage}%` }}
-                />
-              </div>
-            </div>
-          ),
-          duration: Infinity,
-        });
-        return;
-      }
-
-      if (message.type === 'processing') {
-        setState((prev) => ({ ...prev, processingStatus: message.status === 'started' ? 'processing' : 'done' }));
-        return;
-      }
-
-      if (message.type === 'result') {
-        const { id, imageData } = message as WorkerResultMessage;
-        if (latestRequestIdRef.current && id !== latestRequestIdRef.current) return;
-        
-        sileo.success({ title: 'Background removed', description: 'Ready for editing or saving.', duration: 3000 });
-        const url = imageDataToDataUrl(imageData);
-        setAiResultImageData(imageData);
-        setRefinedSrc(null);
-        setIsEditing(false);
-        setProcessedSrc((prev) => { if (prev) URL.revokeObjectURL(prev); return url; });
-        setState((prev) => ({ ...prev, processingStatus: 'done' }));
-        setAnimationKey(id);
-        return;
-      }
-
-      if (message.type === 'error') {
-        sileo.error({ title: 'Processing error', description: message.message });
-        setState((prev) => ({ ...prev, processingStatus: 'error' }));
-      }
-    };
-
-    const handleError = (event: ErrorEvent) => {
-      event.preventDefault();
-      sileo.error({ id: TOAST_MODEL_ID, title: 'Worker error', description: 'Please reload the page.' });
-      setState((prev) => ({ ...prev, modelStatus: 'error', processingStatus: 'error' }));
-    };
-
-    worker.addEventListener('message', handleMessage);
-    worker.addEventListener('error', handleError);
-    worker.postMessage({ type: 'reset' } as WorkerIncomingMessage);
-    worker.postMessage({ type: 'init' } as WorkerIncomingMessage);
-
-    return () => {
-      worker.removeEventListener('message', handleMessage);
-      worker.removeEventListener('error', handleError);
-      worker.terminate();
-    };
+  const handleWorkerSuccess = useCallback((id: string, imageData: ImageData) => {
+    const url = imageDataToDataUrl(imageData);
+    setAiResultImageData(imageData);
+    setRefinedSrc(null);
+    setIsEditing(false);
+    setProcessedSrc((prev) => { if (prev) URL.revokeObjectURL(prev); return url; });
+    setAnimationKey(id);
   }, []);
 
-  useEffect(() => {
-    if (state.modelStatus !== 'loading') return;
-    const timeoutId = window.setTimeout(() => {
-      setState((prev) => {
-        if (prev.modelStatus !== 'loading') return prev;
-        sileo.error({ id: TOAST_MODEL_ID, title: 'Loading timeout', description: 'Taking too long. Please refresh.' });
-        return { ...prev, modelStatus: 'error' };
-      });
-    }, 25000);
-    return () => window.clearTimeout(timeoutId);
-  }, [state.modelStatus]);
+  const { state, setState, processImage } = useBackgroundWorker(latestRequestIdRef, handleWorkerSuccess);
 
   const onFileSelected = async (file: File) => {
     setState((prev) => ({ ...prev, uploadStatus: 'uploading', processingStatus: 'idle' }));
@@ -203,10 +55,10 @@ function App() {
       setOriginalSrc(dataUrl); setOriginalImageData(imageData); setProcessedSrc(null);
       setAnimationKey(''); setIsEditing(false);
       setState((prev) => ({ ...prev, uploadStatus: 'loaded' }));
-      
+
       const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       latestRequestIdRef.current = requestId;
-      workerRef.current?.postMessage({ type: 'process-image', id: requestId, imageData } as WorkerIncomingMessage);
+      processImage(requestId, imageData);
       setState((prev) => ({ ...prev, processingStatus: 'processing' }));
     } catch {
       sileo.error({ title: 'File error', description: 'Could not load image.' });
@@ -273,6 +125,7 @@ function App() {
         </div>
 
         <div className="flex items-center gap-2.5">
+			
           <span className={`hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-medium sm:flex ${
             state.modelStatus === 'ready'
               ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500/20'
@@ -310,61 +163,56 @@ function App() {
       </header>
 
       {/* ── Main content ─────────────────────────────────────────────────── */}
-      <main className="flex-1">
+      <main className={`flex-1 ${isEditing ? 'overflow-hidden' : ''}`}>
+        
+        {/* ── EDITOR MODE (Únic i exclusiu) ── */}
+        {canEdit && isEditing && (
+          <div className="flex h-[calc(100vh-60px)] w-full flex-col overflow-hidden lg:flex-row">
+            <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-slate-100 dark:bg-[#04070d] lg:border-r border-slate-200 dark:border-white/[0.06] transition-colors duration-300">
+              <MaskEditorOverlay originalImageData={originalImageData!} aiResultImageData={aiResultImageData!} onRefined={onRefined} />
+            </div>
 
-        {/* ── EDITOR MODE ── */}
-        {canEdit && (
-          <div className={isEditing ? 'block' : 'hidden'}>
-            <div className="flex h-[calc(100vh-48px)] flex-col lg:flex-row">
-              <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-slate-950 dark:bg-[#04070d] lg:border-r border-slate-200 dark:border-white/[0.06]">
-                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(34,211,238,0.05),transparent_60%)]" />
-                <div className="h-full w-full p-4 sm:p-6 lg:p-8">
-                  <MaskEditorOverlay originalImageData={originalImageData!} aiResultImageData={aiResultImageData!} onRefined={onRefined} />
-                </div>
+            <aside className="flex w-full flex-col gap-5 overflow-y-auto border-t border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#080c14] px-5 py-5 lg:w-72 lg:border-t-0 xl:w-80">
+              <div>
+                <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400 dark:text-slate-500">Editing</p>
+                <h2 className="mt-1 text-base font-semibold text-slate-900 dark:text-slate-100">Refine edges</h2>
+                <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+                  Paint over areas where the AI missed. Restore brings back removed pixels, Erase removes extra background.
+                </p>
               </div>
 
-              <aside className="flex w-full flex-col gap-5 overflow-y-auto border-t border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#080c14] px-5 py-5 lg:w-72 lg:border-t-0 xl:w-80">
-                <div>
-                  <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400 dark:text-slate-500">Editing</p>
-                  <h2 className="mt-1 text-base font-semibold text-slate-900 dark:text-slate-100">Refine edges</h2>
-                  <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-                    Paint over areas where the AI missed. Restore brings back removed pixels, Erase removes extra background.
-                  </p>
-                </div>
+              <div className="h-px bg-slate-100 dark:bg-white/[0.06]" />
 
-                <div className="h-px bg-slate-100 dark:bg-white/[0.06]" />
+              <div className="space-y-2.5">
+                <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400 dark:text-slate-600">Tips</p>
+                {[
+                  { icon: '⚡', text: 'Smart brush auto-selects by colour similarity' },
+                  { icon: '🎯', text: 'Lower tolerance = more precise edges' },
+                  { icon: '↕', text: 'Adjust brush size for fine vs. broad strokes' },
+                ].map(({ icon, text }) => (
+                  <div key={text} className="flex items-start gap-2.5">
+                    <span className="mt-px text-sm leading-none">{icon}</span>
+                    <p className="text-[11px] leading-relaxed text-slate-500">{text}</p>
+                  </div>
+                ))}
+              </div>
 
-                <div className="space-y-2.5">
-                  <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400 dark:text-slate-600">Tips</p>
-                  {[
-                    { icon: '⚡', text: 'Smart brush auto-selects by colour similarity' },
-                    { icon: '🎯', text: 'Lower tolerance = more precise edges' },
-                    { icon: '↕', text: 'Adjust brush size for fine vs. broad strokes' },
-                  ].map(({ icon, text }) => (
-                    <div key={text} className="flex items-start gap-2.5">
-                      <span className="mt-px text-sm leading-none">{icon}</span>
-                      <p className="text-[11px] leading-relaxed text-slate-500">{text}</p>
-                    </div>
-                  ))}
-                </div>
+              <div className="h-px bg-slate-100 dark:bg-white/[0.06]" />
 
-                <div className="h-px bg-slate-100 dark:bg-white/[0.06]" />
-
-                <div className="mt-auto flex flex-col gap-2.5">
-                  <button type="button" onClick={onDownload} disabled={!displaySrc} className="flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 active:scale-[0.98] disabled:opacity-40">
-                    Download PNG
-                  </button>
-                  <button type="button" onClick={() => setIsEditing(false)} className="flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-600 dark:text-slate-400 ring-1 ring-slate-200 dark:ring-white/10 hover:bg-slate-100 dark:hover:bg-white/5 transition">
-                    ← Back to preview
-                  </button>
-                </div>
-              </aside>
-            </div>
+              <div className="mt-auto flex flex-col gap-2.5">
+                <button type="button" onClick={onDownload} disabled={!displaySrc} className="flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 active:scale-[0.98] disabled:opacity-40">
+                  Download PNG
+                </button>
+                <button type="button" onClick={() => setIsEditing(false)} className="flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-600 dark:text-slate-400 ring-1 ring-slate-200 dark:ring-white/10 hover:bg-slate-100 dark:hover:bg-white/5 transition">
+                  ← Back to preview
+                </button>
+              </div>
+            </aside>
           </div>
         )}
 
         {/* ── DEFAULT MODE ── */}
-        <div className={!isEditing ? 'block' : 'hidden'}>
+        {!isEditing && (
           <div className="mx-auto flex w-full max-w-2xl flex-col gap-10 px-4 pb-16 pt-8 sm:px-6 sm:pt-12">
             
             <div className="space-y-3">
@@ -435,18 +283,18 @@ function App() {
               </section>
             )}
           </div>
-        </div>
+        )}
       </main>
       
-      {/* ── Toaster nativa gestionada totalment per Tailwind ── */}
+      {/* ── Toaster nativa 100% calibrada ── */}
       <Toaster
-        position="top-center"
+        position="bottom-left"
         expand
         closeButton
         offset={20}
         gap={10}
         visibleToasts={4}
-        theme={theme === 'dark' ? 'light' : 'dark'} // <── System per heretar nativament la classe html.dark sense inversions zombis
+        theme={theme === 'dark' ? 'light' : 'dark'}
         toastOptions={{
           duration: 3500,
           classNames: {
@@ -466,4 +314,4 @@ function App() {
   );
 }
 
-export default App;
+export default App;	
