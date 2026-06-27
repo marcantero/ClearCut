@@ -111,7 +111,6 @@ export function useBackgroundWorker(
         sileo.success({
           id: IMAGE_PROCESS_ID,
           title: 'Background removed',
-          description: 'Ready.',
           duration: 2200,
         });
 
