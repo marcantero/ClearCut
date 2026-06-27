@@ -115,17 +115,20 @@ function App() {
 		className="relative min-h-screen w-full overflow-x-hidden text-slate-900 dark:text-slate-50 antialiased transition-colors duration-300"
 		onMouseMove={handleMouseMove}
 		>
-		<div className="fixed inset-0 -z-10 bg-[#060a10] overflow-hidden">
+		{/* Fons "Líquid" Interactiu */}
+		<div className="fixed inset-0 -z-10 bg-slate-50 dark:bg-[#060a10] overflow-hidden transition-colors duration-300">
+		
+		{/* Bombolla interactiva (el "blob" del ratolí) */}
 		<div 
 			ref={blobRef}
-			className="pointer-events-none fixed h-96 w-96 rounded-full bg-cyan-500/10 blur-[128px] will-change-transform"
-			style={{ transition: 'transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1)' }}
+			className="pointer-events-none fixed h-96 w-96 rounded-full bg-cyan-500/20 blur-[128px] dark:bg-cyan-500/10 transition-transform duration-500 ease-out will-change-transform"
 		/>
 		
-		{/* Resta de bombolles (les animades) */}
-		<div className="absolute -top-[10%] -left-[10%] h-[600px] w-[600px] rounded-full bg-cyan-500/10 blur-[128px] animate-drift" />
-		<div className="absolute top-[20%] -right-[10%] h-[500px] w-[500px] rounded-full bg-teal-500/10 blur-[128px] animate-swirl [animation-delay:-7s]" />
-		<div className="absolute -bottom-[10%] left-[20%] h-[400px] w-[400px] rounded-full bg-indigo-500/10 blur-[128px] animate-breathe [animation-delay:-4s]" />
+		{/* Bombolles orgàniques */}
+		{/* He rebaixat l'opacitat en mode light perquè no siguin massa invasives */}
+		<div className="absolute -top-[10%] -left-[10%] h-[600px] w-[600px] rounded-full bg-cyan-500/20 blur-[128px] dark:bg-cyan-500/10 animate-drift" />
+		<div className="absolute top-[20%] -right-[10%] h-[500px] w-[500px] rounded-full bg-teal-500/20 blur-[128px] dark:bg-teal-500/10 animate-swirl [animation-delay:-7s]" />
+		<div className="absolute -bottom-[10%] left-[20%] h-[400px] w-[400px] rounded-full bg-indigo-500/20 blur-[128px] dark:bg-indigo-500/10 animate-breathe [animation-delay:-4s]" />
 		</div>
       {/* ── Header ───────────────────────────────────────────────────────── */}
       <header
@@ -138,10 +141,17 @@ function App() {
 		<div className="flex items-center gap-3">
 		{/* LOGO DEFINITIU */}
 		<div className="relative flex h-8 w-8 items-center justify-center">
-			<img 
-			src="/favicon.svg" 
-			alt="ClearCut Logo" 
-			className="w-full h-full object-contain" 
+			<div 
+				className="w-full h-full object-contain text-slate-900 dark:text-white transition-colors duration-300"
+				dangerouslySetInnerHTML={{ 
+				__html: `
+					<svg viewBox="0 0 120 120" fill="currentColor">
+					<rect x="20" y="20" width="60" height="60" rx="12" fill="currentColor" />
+					<rect x="40" y="40" width="60" height="60" rx="12" fill="none" stroke="currentColor" stroke-width="8" />
+					<rect x="0" y="56" width="120" height="8" fill="currentColor" transform="rotate(-45 60 60)" />
+					</svg>
+				` 
+				}}
 			/>
 		</div>
 		
