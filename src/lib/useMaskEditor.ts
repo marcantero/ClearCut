@@ -85,12 +85,20 @@ export function useMaskEditor({
 
   const paintSegment = useCallback(
     (from: { x: number; y: number }, to: { x: number; y: number }) => {
+      
+      // ── Hidden canvas (real mask) ──────────────────────────────────────
       const maskCanvas = brushMode === 'restore'
         ? restoreCanvasRef.current
         : eraseCanvasRef.current;
+        
+      // AFEGIT: Agafem també la màscara contrària
+      const oppositeCanvas = brushMode === 'restore'
+        ? eraseCanvasRef.current
+        : restoreCanvasRef.current; 
 
-      if (!maskCanvas) return;
+      if (!maskCanvas || !oppositeCanvas) return;
 
+      // 1. Pintem a la màscara seleccionada
       const mCtx = maskCanvas.getContext('2d');
       if (mCtx) {
         mCtx.save();
@@ -98,9 +106,7 @@ export function useMaskEditor({
         mCtx.lineCap   = 'round';
         mCtx.lineJoin  = 'round';
         mCtx.lineWidth = brushSize;
-        mCtx.strokeStyle = brushMode === 'restore'
-          ? 'rgba(255,255,255,1)'
-          : 'rgba(0,0,0,1)';
+        mCtx.strokeStyle = brushMode === 'restore' ? 'rgba(255,255,255,1)' : 'rgba(0,0,0,1)';
         mCtx.beginPath();
         mCtx.moveTo(from.x, from.y);
         mCtx.lineTo(to.x,   to.y);
@@ -108,29 +114,19 @@ export function useMaskEditor({
         mCtx.restore();
       }
 
-      const oCanvas = overlayCanvasRef.current;
-      if (oCanvas) {
-        const oCtx = oCanvas.getContext('2d');
-        if (oCtx) {
-          oCtx.save();
-          oCtx.lineCap   = 'round';
-          oCtx.lineJoin  = 'round';
-          oCtx.lineWidth = brushSize;
-
-          if (brushMode === 'restore') {
-            oCtx.globalCompositeOperation = 'source-over';
-            oCtx.strokeStyle = 'rgba(52,211,153,0.45)';
-          } else {
-            oCtx.globalCompositeOperation = 'destination-out';
-            oCtx.strokeStyle = 'rgba(0,0,0,1)';
-          }
-
-          oCtx.beginPath();
-          oCtx.moveTo(from.x, from.y);
-          oCtx.lineTo(to.x,   to.y);
-          oCtx.stroke();
-          oCtx.restore();
-        }
+      // 2. AFEGIT: Actuem com una goma d'esborrar a la màscara contrària
+      const oppCtx = oppositeCanvas.getContext('2d');
+      if (oppCtx) {
+        oppCtx.save();
+        oppCtx.globalCompositeOperation = 'destination-out'; // Això fa d'esborrador
+        oppCtx.lineCap   = 'round';
+        oppCtx.lineJoin  = 'round';
+        oppCtx.lineWidth = brushSize;
+        oppCtx.beginPath();
+        oppCtx.moveTo(from.x, from.y);
+        oppCtx.lineTo(to.x,   to.y);
+        oppCtx.stroke();
+        oppCtx.restore();
       }
     },
     [brushSize, brushMode]

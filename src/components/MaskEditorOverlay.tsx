@@ -13,12 +13,14 @@ type ActiveTool = 'brush' | 'smart';
 
 const BRUSH_SIZES = [8, 16, 32, 56, 80];
 const TOLERANCE_PRESETS = [
-  { label: 'Exact',  value: 8   },
-  { label: 'Low',    value: 25  },
-  { label: 'Med',    value: 55  },
-  { label: 'High',   value: 90  },
-  { label: 'Max',    value: 140 },
+  { label: 'Exact', value: 8   },
+  { label: 'Low',   value: 25  },
+  { label: 'Med',   value: 55  },
+  { label: 'High',  value: 90  },
+  { label: 'Max',   value: 140 },
 ] as const;
+
+type HistoryStep = { restore: ImageData; erase: ImageData; overlay: ImageData };
 
 export function MaskEditorOverlay({
   originalImageData,
@@ -30,15 +32,36 @@ export function MaskEditorOverlay({
   const [activeTool, setActiveTool] = useState<ActiveTool>('brush');
   const [tolerance,  setTolerance]  = useState(55);
 
-  const displayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const historyRef       = useRef<HistoryStep[]>([]);
+  const historyIndexRef  = useRef<number>(-1);
+  const isPointerDownRef = useRef(false);
+  const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
+
+  const displayCanvasRef     = useRef<HTMLCanvasElement | null>(null);
   const getCorrectionMaskRef = useRef<(() => ImageData | null) | null>(null);
-  const onRefinedRef = useRef(onRefined);
+  const onRefinedRef         = useRef(onRefined);
+  const originalCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const tempResultCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const c = document.createElement('canvas');
+    c.width = originalImageData.width;
+    c.height = originalImageData.height;
+    c.getContext('2d')?.putImageData(originalImageData, 0, 0);
+    originalCanvasRef.current = c;
+  }, [originalImageData]);
+
   useLayoutEffect(() => { onRefinedRef.current = onRefined; }, [onRefined]);
 
-  // Per al smart brush: globalVisited es crea en onPointerDown i dura fins onPointerUp
   const strokeVisitedRef = useRef<Uint8Array | null>(null);
-  // Throttle: nombre de frames acumulats sense disparar refineMask
   const pendingFrameRef  = useRef<number | null>(null);
+
+  const syncHistoryUI = useCallback(() => {
+    setHistoryState({
+      canUndo: historyIndexRef.current > 0,
+      canRedo: historyIndexRef.current < historyRef.current.length - 1,
+    });
+  }, []);
 
   const drawResultOnDisplay = useCallback((result: ImageData) => {
     const canvas = displayCanvasRef.current;
@@ -47,13 +70,36 @@ export function MaskEditorOverlay({
     if (!ctx) return;
     canvas.width  = result.width;
     canvas.height = result.height;
-    const TILE = 16;
-    for (let y = 0; y < canvas.height; y += TILE)
+
+    const isDark = document.documentElement.classList.contains('dark');
+    const tileColorA = isDark ? '#1a2235' : '#ffffff';
+    const tileColorB = isDark ? '#111827' : '#f1f5f9';
+
+    const TILE = 14;
+    for (let y = 0; y < canvas.height; y += TILE) {
       for (let x = 0; x < canvas.width; x += TILE) {
-        ctx.fillStyle = (x / TILE + y / TILE) % 2 === 0 ? '#334155' : '#1e293b';
+        ctx.fillStyle = (x / TILE + y / TILE) % 2 === 0 ? tileColorA : tileColorB;
         ctx.fillRect(x, y, TILE, TILE);
       }
-    ctx.putImageData(result, 0, 0);
+    }
+
+    if (originalCanvasRef.current) {
+      ctx.save();
+      ctx.globalAlpha = isDark ? 0.25 : 0.15;
+      ctx.filter = 'grayscale(100%)';
+      ctx.drawImage(originalCanvasRef.current, 0, 0);
+      ctx.restore();
+    }
+
+    if (!tempResultCanvasRef.current) {
+      tempResultCanvasRef.current = document.createElement('canvas');
+    }
+    const tempCanvas = tempResultCanvasRef.current;
+    tempCanvas.width = result.width;
+    tempCanvas.height = result.height;
+    tempCanvas.getContext('2d')?.putImageData(result, 0, 0);
+
+    ctx.drawImage(tempCanvas, 0, 0);
   }, []);
 
   useEffect(() => {
@@ -64,21 +110,30 @@ export function MaskEditorOverlay({
     drawResultOnDisplay(aiResultImageData);
   }, [aiResultImageData, drawResultOnDisplay]);
 
-  // ── refineMask + notificació al pare ──────────────────────────────────────
   const applyRefinement = useCallback(() => {
-    const correctionMask = getCorrectionMaskRef.current?.();
-    if (!correctionMask) return;
-    const refined = refineMask(aiResultImageData, originalImageData, correctionMask);
+    const mask = getCorrectionMaskRef.current?.();
+    if (!mask) return;
+    const refined = refineMask(aiResultImageData, originalImageData, mask);
     drawResultOnDisplay(refined);
     onRefinedRef.current(refined);
   }, [aiResultImageData, originalImageData, drawResultOnDisplay]);
 
-  // Callback per al pinzell normal (dispara en cada segment, ja era així)
-  const handleBrushStroke = useCallback(() => {
-    applyRefinement();
+  useEffect(() => {
+    const observer = new MutationObserver(() => { applyRefinement(); });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
   }, [applyRefinement]);
 
-  // ── useMaskEditor (pinzell clàssic) ───────────────────────────────────────
+  const handleBrushStroke = useCallback(() => { applyRefinement(); }, [applyRefinement]);
+
+  const scheduleRefinement = useCallback(() => {
+    if (pendingFrameRef.current !== null) return;
+    pendingFrameRef.current = requestAnimationFrame(() => {
+      pendingFrameRef.current = null;
+      applyRefinement();
+    });
+  }, [applyRefinement]);
+
   const {
     canvasRef: overlayCanvasRef,
     hasEdits,
@@ -98,307 +153,326 @@ export function MaskEditorOverlay({
     onStroke: activeTool === 'brush' ? handleBrushStroke : undefined,
   });
 
-  useLayoutEffect(() => {
-    getCorrectionMaskRef.current = getCorrectionMask;
-  }, [getCorrectionMask]);
+  useLayoutEffect(() => { getCorrectionMaskRef.current = getCorrectionMask; }, [getCorrectionMask]);
 
-  // ── useSmartBrush (pinzell intel·ligent) ──────────────────────────────────
+  const captureSnapshot = useCallback(() => {
+    const { restoreCanvas, eraseCanvas } = getHiddenCanvases();
+    const overlayCanvas = overlayCanvasRef.current;
+    if (!restoreCanvas || !eraseCanvas || !overlayCanvas || restoreCanvas.width === 0) return;
+
+    const rCtx = restoreCanvas.getContext('2d');
+    const eCtx = eraseCanvas.getContext('2d');
+    const oCtx = overlayCanvas.getContext('2d');
+    if (!rCtx || !eCtx || !oCtx) return;
+
+    const step: HistoryStep = {
+      restore: rCtx.getImageData(0, 0, restoreCanvas.width, restoreCanvas.height),
+      erase:   eCtx.getImageData(0, 0, eraseCanvas.width, eraseCanvas.height),
+      overlay: oCtx.getImageData(0, 0, overlayCanvas.width, overlayCanvas.height),
+    };
+
+    const currIdx = historyIndexRef.current;
+    const nextHistory = historyRef.current.slice(0, currIdx + 1);
+    nextHistory.push(step);
+    if (nextHistory.length > 20) nextHistory.shift();
+
+    historyRef.current      = nextHistory;
+    historyIndexRef.current = nextHistory.length - 1;
+    syncHistoryUI();
+  }, [getHiddenCanvases, syncHistoryUI]);
+
+  useEffect(() => {
+    const { restoreCanvas, eraseCanvas } = getHiddenCanvases();
+    const overlayCanvas = overlayCanvasRef.current;
+    if (!restoreCanvas || !eraseCanvas || !overlayCanvas || restoreCanvas.width === 0) return;
+    const rCtx = restoreCanvas.getContext('2d');
+    const eCtx = eraseCanvas.getContext('2d');
+    const oCtx = overlayCanvas.getContext('2d');
+    if (!rCtx || !eCtx || !oCtx) return;
+
+    const step0: HistoryStep = {
+      restore: rCtx.getImageData(0, 0, restoreCanvas.width, restoreCanvas.height),
+      erase:   eCtx.getImageData(0, 0, eraseCanvas.width, eraseCanvas.height),
+      overlay: oCtx.getImageData(0, 0, overlayCanvas.width, overlayCanvas.height),
+    };
+
+    historyRef.current      = [step0];
+    historyIndexRef.current = 0;
+    syncHistoryUI();
+  }, [aiResultImageData, getHiddenCanvases, syncHistoryUI]);
+
+  const applyHistoryStep = useCallback((targetIndex: number) => {
+    const step = historyRef.current[targetIndex];
+    if (!step) return;
+    const { restoreCanvas, eraseCanvas } = getHiddenCanvases();
+    const overlayCanvas = overlayCanvasRef.current;
+
+    restoreCanvas?.getContext('2d')?.putImageData(step.restore, 0, 0);
+    eraseCanvas?.getContext('2d')?.putImageData(step.erase, 0, 0);
+    overlayCanvas?.getContext('2d')?.putImageData(step.overlay, 0, 0);
+
+    historyIndexRef.current = targetIndex;
+    syncHistoryUI();
+    notifyExternalEdit();
+
+    const mask = getCorrectionMaskRef.current?.();
+    if (mask) {
+      const refined = refineMask(aiResultImageData, originalImageData, mask);
+      drawResultOnDisplay(refined);
+      onRefinedRef.current(refined);
+    } else {
+      drawResultOnDisplay(aiResultImageData);
+      onRefinedRef.current(aiResultImageData);
+    }
+  }, [getHiddenCanvases, syncHistoryUI, notifyExternalEdit, aiResultImageData, originalImageData, drawResultOnDisplay]);
+
+  const undo = useCallback(() => {
+    if (historyIndexRef.current <= 0) return;
+    applyHistoryStep(historyIndexRef.current - 1);
+  }, [applyHistoryStep]);
+
+  const redo = useCallback(() => {
+    if (historyIndexRef.current >= historyRef.current.length - 1) return;
+    applyHistoryStep(historyIndexRef.current + 1);
+  }, [applyHistoryStep]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+
+      const key = e.key.toLowerCase();
+      if (key === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      } else if (key === 'y') {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undo, redo]);
+
+  const handleBrushDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    isPointerDownRef.current = true;
+    brushPointerDown(e);
+  }, [brushPointerDown]);
+
+  const handleBrushUp = useCallback(() => {
+    if (isPointerDownRef.current) {
+      isPointerDownRef.current = false;
+      brushPointerUp();
+      captureSnapshot();
+    } else brushPointerUp();
+  }, [brushPointerUp, captureSnapshot]);
+
+  const handleBrushLeave = useCallback(() => {
+    if (isPointerDownRef.current) {
+      isPointerDownRef.current = false;
+      brushPointerLeave();
+      captureSnapshot();
+    } else brushPointerLeave();
+  }, [brushPointerLeave, captureSnapshot]);
+
   const { fillAt, createStrokeState, getScaledPos } = useSmartBrush();
 
-  // Throttle del refineMask per al smart brush:
-  // acumula fills a cada onPointerMove, però refineMask es dispara
-  // en el proper rAF (màxim 60 vegades/s), no en cada píxel
-  const scheduleRefinement = useCallback(() => {
-    if (pendingFrameRef.current !== null) return; // ja programat
-    pendingFrameRef.current = requestAnimationFrame(() => {
-      pendingFrameRef.current = null;
-      applyRefinement();
-    });
-  }, [applyRefinement]);
+  const handleSmartDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    isPointerDownRef.current = true;
+    const canvas = overlayCanvasRef.current;
+    if (!canvas) return;
+    
+    strokeVisitedRef.current = createStrokeState(aiResultImageData.width, aiResultImageData.height);
+    const pos = getScaledPos(e, canvas);
+    const { restoreCanvas, eraseCanvas } = getHiddenCanvases();
+    
+    const maskCanvas = brushMode === 'restore' ? restoreCanvas : eraseCanvas;
+    const oppositeCanvas = brushMode === 'restore' ? eraseCanvas : restoreCanvas;
+    if (!maskCanvas || !oppositeCanvas) return;
 
-  const smartPointerDown = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
-      const canvas = overlayCanvasRef.current;
-      if (!canvas) return;
-
-      // Crear globalVisited per a aquest stroke
-      strokeVisitedRef.current = createStrokeState(
-        aiResultImageData.width,
-        aiResultImageData.height,
-      );
-
-      const pos = getScaledPos(e, canvas);
-      const { restoreCanvas, eraseCanvas } = getHiddenCanvases();
-      const maskCanvas = brushMode === 'restore' ? restoreCanvas : eraseCanvas;
-      if (!maskCanvas) return;
-
-      fillAt(
-        originalImageData,   // mostreig des de la imatge original (té RGB reals)
-        maskCanvas,
-        canvas,
-        pos.x, pos.y,
-        brushSize,           // radi espacial = brushSize de la UI
-        tolerance,
-        brushMode,
-        strokeVisitedRef.current,
-      );
-
-      notifyExternalEdit();
-      scheduleRefinement();
-    },
-    [
-      overlayCanvasRef, createStrokeState, aiResultImageData,
-      getScaledPos, getHiddenCanvases, brushMode, fillAt,
-      originalImageData, brushSize, tolerance,
-      notifyExternalEdit, scheduleRefinement,
-    ],
-  );
-
-  const smartPointerMove = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
-      if (!strokeVisitedRef.current) return; // no estem dibuixant
-      const canvas = overlayCanvasRef.current;
-      if (!canvas) return;
-
-      const pos = getScaledPos(e, canvas);
-      const { restoreCanvas, eraseCanvas } = getHiddenCanvases();
-      const maskCanvas = brushMode === 'restore' ? restoreCanvas : eraseCanvas;
-      if (!maskCanvas) return;
-
-      fillAt(
-        originalImageData,
-        maskCanvas,
-        canvas,
-        pos.x, pos.y,
-        brushSize,
-        tolerance,
-        brushMode,
-        strokeVisitedRef.current,
-      );
-
-      notifyExternalEdit();
-      scheduleRefinement();
-    },
-    [
-      overlayCanvasRef, getScaledPos, getHiddenCanvases, brushMode,
-      fillAt, originalImageData, brushSize, tolerance,
-      notifyExternalEdit, scheduleRefinement,
-    ],
-  );
-
-  const smartPointerUp = useCallback(() => {
-    strokeVisitedRef.current = null;
-    // Garantir que el darrer frame de refinament s'aplica
-    if (pendingFrameRef.current !== null) {
-      cancelAnimationFrame(pendingFrameRef.current);
-      pendingFrameRef.current = null;
+    fillAt(originalImageData, maskCanvas, canvas, pos.x, pos.y, brushSize, tolerance, brushMode, strokeVisitedRef.current);
+    
+    const oppCtx = oppositeCanvas.getContext('2d');
+    if (oppCtx) {
+      oppCtx.save();
+      oppCtx.globalCompositeOperation = 'destination-out';
+      oppCtx.drawImage(maskCanvas, 0, 0);
+      oppCtx.restore();
     }
-    applyRefinement();
-  }, [applyRefinement]);
+    notifyExternalEdit();
+    scheduleRefinement();
+  }, [overlayCanvasRef, createStrokeState, aiResultImageData, getScaledPos, getHiddenCanvases, brushMode, fillAt, originalImageData, brushSize, tolerance, notifyExternalEdit, scheduleRefinement]);
+  
+  const smartPointerMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!strokeVisitedRef.current) return;
+    const canvas = overlayCanvasRef.current;
+    if (!canvas) return;
+    const pos = getScaledPos(e, canvas);
+    const { restoreCanvas, eraseCanvas } = getHiddenCanvases();
+    
+    const maskCanvas = brushMode === 'restore' ? restoreCanvas : eraseCanvas;
+    const oppositeCanvas = brushMode === 'restore' ? eraseCanvas : restoreCanvas;
+    if (!maskCanvas || !oppositeCanvas) return;
 
-  const smartPointerLeave = useCallback(() => {
+    fillAt(originalImageData, maskCanvas, canvas, pos.x, pos.y, brushSize, tolerance, brushMode, strokeVisitedRef.current);
+    
+    const oppCtx = oppositeCanvas.getContext('2d');
+    if (oppCtx) {
+      oppCtx.save();
+      oppCtx.globalCompositeOperation = 'destination-out';
+      oppCtx.drawImage(maskCanvas, 0, 0);
+      oppCtx.restore();
+    }
+    notifyExternalEdit();
+    scheduleRefinement();
+  }, [overlayCanvasRef, getScaledPos, getHiddenCanvases, brushMode, fillAt, originalImageData, brushSize, tolerance, notifyExternalEdit, scheduleRefinement]);
+
+  const handleSmartUp = useCallback(() => {
     strokeVisitedRef.current = null;
-  }, []);
+    if (pendingFrameRef.current !== null) { cancelAnimationFrame(pendingFrameRef.current); pendingFrameRef.current = null; }
+    applyRefinement();
+    if (isPointerDownRef.current) {
+      isPointerDownRef.current = false;
+      captureSnapshot();
+    }
+  }, [applyRefinement, captureSnapshot]);
 
-  // ── Routing d'events al canvas ────────────────────────────────────────────
-  const canvasProps =
-    activeTool === 'brush'
-      ? {
-          onMouseDown:  brushPointerDown,
-          onMouseMove:  brushPointerMove,
-          onMouseUp:    brushPointerUp,
-          onMouseLeave: brushPointerLeave,
-        }
-      : {
-          onMouseDown:  smartPointerDown,
-          onMouseMove:  smartPointerMove,
-          onMouseUp:    smartPointerUp,
-          onMouseLeave: smartPointerLeave,
-        };
+  const handleSmartLeave = useCallback(() => {
+    strokeVisitedRef.current = null;
+    if (isPointerDownRef.current) {
+      isPointerDownRef.current = false;
+      captureSnapshot();
+    }
+  }, [captureSnapshot]);
+
+  const canvasProps = activeTool === 'brush'
+    ? { onMouseDown: handleBrushDown, onMouseMove: brushPointerMove, onMouseUp: handleBrushUp, onMouseLeave: handleBrushLeave }
+    : { onMouseDown: handleSmartDown, onMouseMove: smartPointerMove, onMouseUp: handleSmartUp, onMouseLeave: handleSmartLeave };
 
   const handleClear = () => {
     clearEdits();
     drawResultOnDisplay(aiResultImageData);
     onRefinedRef.current(aiResultImageData);
+    captureSnapshot();
   };
 
-  // ── Cursors ───────────────────────────────────────────────────────────────
   const getCursor = (): string => {
     const sz   = Math.max(16, Math.min(96, brushSize * 2));
     const half = sz / 2;
+    const isDark = document.documentElement.classList.contains('dark');
 
     if (activeTool === 'brush') {
-      const col = brushMode === 'restore' ? 'white' : '%23f87171';
-      const fop = brushMode === 'restore' ? '0.12'  : '0.10';
+      const col = brushMode === 'restore' ? (isDark ? 'white' : '%230f172a') : '%23f87171';
+      const fop = brushMode === 'restore' ? '0.12' : '0.08';
       const svg = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${sz}' height='${sz}'%3E%3Ccircle cx='${half}' cy='${half}' r='${half - 1}' stroke='${col}' stroke-width='1.5' fill='${col}' fill-opacity='${fop}'/%3E%3C/svg%3E`;
       return `url("${svg}") ${half} ${half}, crosshair`;
     }
-
-    // Smart brush: cercle sòlid amb creu central
-    const col = brushMode === 'restore' ? '%2334d399' : '%23f87171';
-    const svg = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${sz}' height='${sz}'%3E%3Ccircle cx='${half}' cy='${half}' r='${half - 1}' stroke='${col}' stroke-width='2' stroke-dasharray='4 3' fill='${col}' fill-opacity='0.08'/%3E%3Cline x1='${half}' y1='${half - 4}' x2='${half}' y2='${half + 4}' stroke='${col}' stroke-width='1.5'/%3E%3Cline x1='${half - 4}' y1='${half}' x2='${half + 4}' y2='${half}' stroke='${col}' stroke-width='1.5'/%3E%3C/svg%3E`;
+    const col = brushMode === 'restore' ? '%2310b981' : '%23f87171';
+    const svg = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${sz}' height='${sz}'%3E%3Ccircle cx='${half}' cy='${half}' r='${half - 1}' stroke='${col}' stroke-width='2' stroke-dasharray='4 3' fill='${col}' fill-opacity='0.07'/%3E%3Cline x1='${half}' y1='${half-4}' x2='${half}' y2='${half+4}' stroke='${col}' stroke-width='1.5'/%3E%3Cline x1='${half-4}' y1='${half}' x2='${half+4}' y2='${half}' stroke='${col}' stroke-width='1.5'/%3E%3C/svg%3E`;
     return `url("${svg}") ${half} ${half}, crosshair`;
   };
 
   return (
-    <div className="flex flex-col gap-3">
-      {/* ── Toolbar ──────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-800/80 bg-slate-900/70 px-4 py-2.5 text-xs backdrop-blur">
+    <div className="flex h-full max-h-full w-full flex-col gap-3 overflow-hidden">
+      
+      {/* ── TOOLBAR PRINCIPAL ────────────────────────────────────────── */}
+      <div className="flex flex-shrink-0 flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm dark:border-white/[0.07] dark:bg-white/[0.03] dark:shadow-none transition-all">
+        
+        <div className="flex items-center gap-0.5 rounded-lg border border-slate-200/80 bg-slate-100 p-0.5 dark:border-white/[0.06] dark:bg-black/20">
+          <ToolBtn active={brushMode === 'restore'} activeClass="bg-emerald-50 text-emerald-700 border border-emerald-200/80 dark:border-transparent dark:bg-emerald-500/20 dark:text-emerald-300 shadow-sm dark:shadow-none" onClick={() => setBrushMode('restore')}>
+            <span className="text-[10px]">✦</span> Restore
+          </ToolBtn>
+          <ToolBtn active={brushMode === 'erase'} activeClass="bg-rose-50 text-rose-700 border border-rose-200/80 dark:border-transparent dark:bg-rose-500/20 dark:text-rose-300 shadow-sm dark:shadow-none" onClick={() => setBrushMode('erase')}>
+            <span className="text-[10px]">◌</span> Erase
+          </ToolBtn>
+        </div>
 
-        {/* Restore / Erase */}
-        <div className="flex items-center gap-1 rounded-xl border border-slate-700/60 bg-slate-950/60 p-1">
-          <button
-            type="button"
-            onClick={() => setBrushMode('restore')}
-            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-medium transition-all ${
-              brushMode === 'restore'
-                ? 'bg-emerald-500/20 text-emerald-200 shadow-inner'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <span>✦</span> Restore
+        <div className="h-5 w-px bg-slate-200 dark:bg-white/[0.08]" />
+
+        <div className="flex items-center gap-0.5 rounded-lg border border-slate-200/80 bg-slate-100 p-0.5 dark:border-white/[0.06] dark:bg-black/20">
+          <button type="button" onClick={undo} disabled={!historyState.canUndo} title="Desfer (Ctrl+Z)" className="flex h-6 w-6 items-center justify-center rounded-md text-slate-500 hover:bg-white hover:text-slate-900 hover:shadow-sm dark:text-slate-400 dark:hover:bg-white/[0.08] dark:hover:text-slate-100 dark:hover:shadow-none disabled:opacity-25 transition">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
           </button>
-          <button
-            type="button"
-            onClick={() => setBrushMode('erase')}
-            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-medium transition-all ${
-              brushMode === 'erase'
-                ? 'bg-rose-500/20 text-rose-300 shadow-inner'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <span>◌</span> Erase
+          <button type="button" onClick={redo} disabled={!historyState.canRedo} title="Refer (Ctrl+Shift+Z)" className="flex h-6 w-6 items-center justify-center rounded-md text-slate-500 hover:bg-white hover:text-slate-900 hover:shadow-sm dark:text-slate-400 dark:hover:bg-white/[0.08] dark:hover:text-slate-100 dark:hover:shadow-none disabled:opacity-25 transition">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/></svg>
           </button>
         </div>
 
-        {/* Brush / Smart */}
-        <div className="flex items-center gap-1 rounded-xl border border-slate-700/60 bg-slate-950/60 p-1">
-          <button
-            type="button"
-            onClick={() => setActiveTool('brush')}
-            title="Pinzell lliure"
-            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-medium transition-all ${
-              activeTool === 'brush'
-                ? 'bg-cyan-500/20 text-cyan-200 shadow-inner'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
-            </svg>
+        <div className="h-5 w-px bg-slate-200 dark:bg-white/[0.08]" />
+
+        <div className="flex items-center gap-0.5 rounded-lg border border-slate-200/80 bg-slate-100 p-0.5 dark:border-white/[0.06] dark:bg-black/20">
+          <ToolBtn active={activeTool === 'brush'} activeClass="bg-white text-cyan-700 border border-slate-200/80 shadow-sm dark:border-transparent dark:bg-cyan-500/20 dark:text-cyan-300 dark:shadow-none" onClick={() => setActiveTool('brush')} title="Freehand brush">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
             Brush
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTool('smart')}
-            title="Pinzell intel·ligent — selecciona per color"
-            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-medium transition-all ${
-              activeTool === 'smart'
-                ? 'bg-cyan-500/20 text-cyan-200 shadow-inner'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            {/* Spark / magic wand icon */}
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275Z"/>
-            </svg>
+          </ToolBtn>
+          <ToolBtn active={activeTool === 'smart'} activeClass="bg-white text-cyan-700 border border-slate-200/80 shadow-sm dark:border-transparent dark:bg-cyan-500/20 dark:text-cyan-300 dark:shadow-none" onClick={() => setActiveTool('smart')} title="Smart brush">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275Z"/></svg>
             Smart
-          </button>
+          </ToolBtn>
         </div>
 
-        {/* Brush size */}
-        <div className="flex items-center gap-2 text-slate-400">
-          <span className="text-[10px] uppercase tracking-wider">Size</span>
+        <div className="h-5 w-px bg-slate-200 dark:bg-white/[0.08]" />
+
+        <div className="flex items-center gap-1.5">
+          <span className="text-[9px] font-medium uppercase tracking-widest text-slate-400 dark:text-slate-600">Size</span>
           <div className="flex items-center gap-1">
             {BRUSH_SIZES.map((size) => (
-              <button
-                key={size}
-                type="button"
-                onClick={() => setBrushSize(size)}
-                className={`flex items-center justify-center rounded-full transition-all ${
-                  brushSize === size
-                    ? 'border border-cyan-400/60 bg-cyan-400/15 text-cyan-300'
-                    : 'border border-transparent text-slate-500 hover:text-slate-300'
-                }`}
-                style={{ width: 28, height: 28 }}
-                title={`${size}px`}
-              >
-                <span className="rounded-full bg-current" style={{
-                  width:  Math.max(4, Math.min(16, size / 5)),
-                  height: Math.max(4, Math.min(16, size / 5)),
-                }} />
+              <button key={size} type="button" onClick={() => setBrushSize(size)} title={`${size}px`} className={`flex h-6 w-6 items-center justify-center rounded-full transition-all ${brushSize === size ? 'bg-cyan-50 dark:bg-cyan-400/15 ring-1 ring-cyan-500/40 dark:ring-cyan-400/50' : 'hover:bg-slate-100 dark:hover:bg-white/[0.05]'}`}>
+                <span className={`rounded-full transition-colors ${brushSize === size ? 'bg-cyan-600 dark:bg-cyan-400' : 'bg-slate-400 dark:bg-slate-600'}`} style={{ width: Math.max(3, Math.min(14, size / 5)), height: Math.max(3, Math.min(14, size / 5)) }} />
               </button>
             ))}
           </div>
         </div>
 
-        {/* Tolerance — only in smart mode */}
         {activeTool === 'smart' && (
-          <div className="flex items-center gap-2 text-slate-400">
-            <span className="text-[10px] uppercase tracking-wider">Tolerance</span>
-            <div className="flex items-center gap-1">
-              {TOLERANCE_PRESETS.map(({ label, value }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => setTolerance(value)}
-                  title={`RGB distance ≤ ${value}`}
-                  className={`rounded-lg px-2.5 py-1 text-[10px] font-medium transition-all ${
-                    tolerance === value
-                      ? 'bg-cyan-400/15 text-cyan-200 border border-cyan-400/60'
-                      : 'border border-transparent text-slate-500 hover:text-slate-300 hover:border-slate-700'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+          <>
+            <div className="h-5 w-px bg-slate-200 dark:bg-white/[0.08]" />
+            <div className="flex items-center gap-1.5">
+              <span className="text-[9px] font-medium uppercase tracking-widest text-slate-400 dark:text-slate-600">Tolerance</span>
+              <div className="flex items-center gap-0.5">
+                {TOLERANCE_PRESETS.map(({ label, value }) => (
+                  <button key={value} type="button" onClick={() => setTolerance(value)} title={`RGB distance ≤ ${value}`} className={`rounded-md px-2 py-1 text-[10px] font-medium transition-all ${tolerance === value ? 'bg-cyan-50 text-cyan-700 ring-1 ring-cyan-500/30 dark:bg-cyan-400/15 dark:text-cyan-300 dark:ring-cyan-400/40' : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-300'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          </>
         )}
 
         {hasEdits && (
-          <button
-            type="button"
-            onClick={handleClear}
-            className="ml-auto rounded-lg border border-slate-700/60 bg-slate-950/60 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-400 transition hover:border-rose-500/40 hover:text-rose-300"
-          >
+          <button type="button" onClick={handleClear} className="ml-auto rounded-lg px-2.5 py-1.5 text-[10px] font-medium text-slate-500 ring-1 ring-slate-200 hover:bg-rose-50 hover:text-rose-600 dark:ring-white/[0.06] dark:hover:bg-transparent dark:hover:text-rose-400 transition">
             Clear
           </button>
         )}
       </div>
 
-      {/* ── Canvas stack ─────────────────────────────────────────────────── */}
-      <div
-        className="relative overflow-hidden rounded-2xl border border-slate-800/60 shadow-[0_16px_60px_rgba(0,0,0,0.8)]"
-        style={{ touchAction: 'none' }}
-      >
-        <canvas ref={displayCanvasRef} className="block w-full" />
+      {/* ── CANVAS AREA ─────────────────────────────────────────────────── */}
+      <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-200 dark:border-white/[0.06] flex items-center justify-center bg-white dark:bg-black/20 shadow-sm dark:shadow-none transition-all" style={{ touchAction: 'none' }}>
+        <div className="relative flex items-center justify-center h-full w-full p-2">
+          <div className="relative max-h-full max-w-full" style={{ aspectRatio: `${aiResultImageData.width} / ${aiResultImageData.height}` }}>
+            <canvas ref={displayCanvasRef} className="block h-full w-full object-contain" style={{ imageRendering: 'pixelated' }} />
+            <canvas ref={overlayCanvasRef} className="absolute inset-0 h-full w-full object-contain" style={{ cursor: getCursor(), touchAction: 'none' }} {...canvasProps} />
+          </div>
+        </div>
 
-        <canvas
-          ref={overlayCanvasRef}
-          className="absolute inset-0 w-full h-full"
-          style={{ cursor: getCursor(), touchAction: 'none' }}
-          {...canvasProps}
-        />
-
-        {/* Mode badge */}
         <div className="pointer-events-none absolute bottom-3 right-3">
-          <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-medium backdrop-blur-sm transition-all ${
-            brushMode === 'restore'
-              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-              : 'border-rose-500/30 bg-rose-500/10 text-rose-300'
-          }`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${brushMode === 'restore' ? 'bg-emerald-400' : 'bg-rose-400'}`} />
-            {brushMode === 'restore' ? 'Restoring from original' : 'Erasing area'}
+          <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-medium backdrop-blur-md shadow-sm dark:shadow-none ${brushMode === 'restore' ? 'border-emerald-500/30 bg-emerald-50/90 text-emerald-800 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-300' : 'border-rose-500/30 bg-rose-50/90 text-rose-800 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-300'}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${brushMode === 'restore' ? 'bg-emerald-500 dark:bg-emerald-400' : 'bg-rose-500 dark:bg-rose-400'}`} />
+            {brushMode === 'restore' ? 'Restoring' : 'Erasing'}
+            {activeTool === 'smart' && <span className="ml-1 opacity-60">· Smart</span>}
           </span>
         </div>
       </div>
-
-      <p className="text-center text-[10px] text-slate-500">
-        {activeTool === 'brush'
-          ? 'Restore recovers pixels from the original · Erase removes areas from the AI result'
-          : 'Smart brush selects similar colours as you paint · adjust tolerance for finer or broader edges'}
-      </p>
     </div>
+  );
+}
+
+function ToolBtn({ children, active, activeClass, onClick, title }: { children: React.ReactNode; active: boolean; activeClass: string; onClick: () => void; title?: string; }) {
+  return (
+    <button type="button" onClick={onClick} title={title} className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-all ${active ? activeClass : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-300'}`}>
+      {children}
+    </button>
   );
 }
