@@ -42,13 +42,9 @@ export function useMaskEditor({
   useEffect(() => {
     if (width === 0 || height === 0) return;
 
-    console.log('[useMaskEditor] dimension useEffect, resizing to:', width, 'x', height);
     for (const ref of [overlayCanvasRef, restoreCanvasRef, eraseCanvasRef]) {
       const c = ref.current;
-      if (!c) {
-        console.log('[useMaskEditor] canvas ref is null, skipping');
-        continue;
-      }
+      if (!c) continue;
       c.width  = width;
       c.height = height;
     }
@@ -57,11 +53,9 @@ export function useMaskEditor({
 
   // Create hidden canvases once and resize
   useEffect(() => {
-    console.log('[useMaskEditor] creating hidden canvases');
     restoreCanvasRef.current = document.createElement('canvas');
     eraseCanvasRef.current   = document.createElement('canvas');
     
-    // Resize immediately after creating them
     if (width > 0 && height > 0) {
       if (restoreCanvasRef.current) {
         restoreCanvasRef.current.width = width;
@@ -91,20 +85,12 @@ export function useMaskEditor({
 
   const paintSegment = useCallback(
     (from: { x: number; y: number }, to: { x: number; y: number }) => {
-      console.log('[paintSegment] called, mode:', brushMode, 'from:', from, 'to:', to);
-      
-      // ── Hidden canvas (real mask) ──────────────────────────────────────
       const maskCanvas = brushMode === 'restore'
         ? restoreCanvasRef.current
         : eraseCanvasRef.current;
 
-      if (!maskCanvas) {
-        console.warn('[paintSegment] maskCanvas is null!', 'mode:', brushMode, 'restoreCanvas:', restoreCanvasRef.current, 'eraseCanvas:', eraseCanvasRef.current);
-        return;
-      }
+      if (!maskCanvas) return;
 
-      console.log('[paintSegment] maskCanvas exists, size:', maskCanvas.width, 'x', maskCanvas.height);
-      
       const mCtx = maskCanvas.getContext('2d');
       if (mCtx) {
         mCtx.save();
@@ -120,10 +106,8 @@ export function useMaskEditor({
         mCtx.lineTo(to.x,   to.y);
         mCtx.stroke();
         mCtx.restore();
-        console.log('[paintSegment] stroke drawn on maskCanvas');
       }
 
-      // ── Visible overlay (feedback for user) ──────────────────────────
       const oCanvas = overlayCanvasRef.current;
       if (oCanvas) {
         const oCtx = oCanvas.getContext('2d');
@@ -134,12 +118,9 @@ export function useMaskEditor({
           oCtx.lineWidth = brushSize;
 
           if (brushMode === 'restore') {
-            // Green semitransparent → area to be restored
             oCtx.globalCompositeOperation = 'source-over';
             oCtx.strokeStyle = 'rgba(52,211,153,0.45)';
           } else {
-            // Red semitransparent → area to be erased
-            // destination-out to "punch" the overlay and see what's below
             oCtx.globalCompositeOperation = 'destination-out';
             oCtx.strokeStyle = 'rgba(0,0,0,1)';
           }
@@ -149,7 +130,6 @@ export function useMaskEditor({
           oCtx.lineTo(to.x,   to.y);
           oCtx.stroke();
           oCtx.restore();
-          console.log('[paintSegment] overlay stroke drawn');
         }
       }
     },
@@ -158,14 +138,9 @@ export function useMaskEditor({
 
   const onPointerDown = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
-      console.log('[useMaskEditor] onPointerDown fired');
       isDrawingRef.current = true;
       const pos = getScaledPos(e);
-      if (!pos) {
-        console.log('[useMaskEditor] getScaledPos returned null');
-        return;
-      }
-      console.log('[useMaskEditor] painting at', pos, 'mode:', brushMode);
+      if (!pos) return;
       lastPosRef.current = pos;
       paintSegment(pos, pos);
       setHasEdits(true);
@@ -182,7 +157,7 @@ export function useMaskEditor({
       paintSegment(lastPosRef.current, pos);
       lastPosRef.current = pos;
       setHasEdits(true);
-      onStroke?.();          // ← temps real: dispara refineMask a cada segment
+      onStroke?.();
     },
     [getScaledPos, paintSegment, onStroke]
   );
@@ -204,44 +179,30 @@ export function useMaskEditor({
   const getCorrectionMask = useCallback((): ImageData | null => {
     const rCanvas = restoreCanvasRef.current;
     const eCanvas = eraseCanvasRef.current;
-    if (!rCanvas || !eCanvas || rCanvas.width === 0) {
-      console.warn('[getCorrectionMask] canvas is null or empty');
-      return null;
-    }
+    if (!rCanvas || !eCanvas || rCanvas.width === 0) return null;
 
     const { width: w, height: h } = rCanvas;
     const out  = new ImageData(w, h);
 
     const rCtx = rCanvas.getContext('2d');
     const eCtx = eCanvas.getContext('2d');
-    if (!rCtx || !eCtx) {
-      console.warn('[getCorrectionMask] context is null');
-      return null;
-    }
+    if (!rCtx || !eCtx) return null;
 
     const rData = rCtx.getImageData(0, 0, w, h).data;
     const eData = eCtx.getImageData(0, 0, w, h).data;
     const o     = out.data;
-
-    let restoreCount = 0, eraseCount = 0;
 
     for (let i = 0; i < o.length; i += 4) {
       const hasErase   = eData[i + 3] > 0;
       const hasRestore = rData[i + 3] > 0;
 
       if (hasErase) {
-        // Negre opac → ERASE
         o[i] = 0; o[i+1] = 0; o[i+2] = 0; o[i+3] = 255;
-        eraseCount++;
       } else if (hasRestore) {
-        // Blanc opac → RESTORE
         o[i] = 255; o[i+1] = 255; o[i+2] = 255; o[i+3] = 255;
-        restoreCount++;
       }
-      // sinó: transparent (a=0), sense canvi
     }
 
-    console.log('[getCorrectionMask] created mask, restore pixels:', restoreCount, 'erase pixels:', eraseCount);
     return out;
   }, []);
 
@@ -255,6 +216,27 @@ export function useMaskEditor({
     setHasEdits(false);
   }, []);
 
+  /**
+   * Exposed so external tools (e.g. flood fill) can paint directly onto the
+   * hidden mask canvases and the visible overlay, keeping full architectural
+   * parity with brush strokes.
+   */
+  const getHiddenCanvases = useCallback(() => ({
+    restoreCanvas: restoreCanvasRef.current,
+    eraseCanvas:   eraseCanvasRef.current,
+    overlayCanvas: overlayCanvasRef.current,
+  }), []);
+
+  /**
+   * Called by external tools after they have painted onto the hidden canvases
+   * directly, so hasEdits is updated and onStroke fires — identical lifecycle
+   * to a brush stroke.
+   */
+  const notifyExternalEdit = useCallback(() => {
+    setHasEdits(true);
+    onStroke?.();
+  }, [onStroke]);
+
   return {
     canvasRef: overlayCanvasRef,
     hasEdits,
@@ -264,5 +246,7 @@ export function useMaskEditor({
     onPointerLeave,
     getCorrectionMask,
     clearEdits,
+    getHiddenCanvases,
+    notifyExternalEdit,
   };
-} 
+}
