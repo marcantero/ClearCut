@@ -8,9 +8,7 @@
   gradient glow used throughout the UI. This sets the tone before anyone
   reads a single line of text.
 -->
-<img src="./assets/clearcut-banner.png" alt="ClearCut banner" width="100%" />
-
-# ClearCut
+<img src="./public/preview.png" alt="ClearCut banner" width="100%" />
 
 **Privacy-first, in-browser AI background removal.**
 No uploads. No servers. No tracking. Just your browser and your GPU/CPU.
@@ -18,8 +16,6 @@ No uploads. No servers. No tracking. Just your browser and your GPU/CPU.
 [Live Demo](https://marcantero.github.io/clearcut-ai-background-remover/) · [Report a Bug](https://github.com/marcantero/ClearCut/issues) · [Request a Feature](https://github.com/marcantero/ClearCut/issues)
 
 </div>
-
-<br />
 
 <!--
   IMAGE 2 — Main product screenshot / GIF
