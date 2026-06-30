@@ -13,7 +13,7 @@
 **Privacy-first, in-browser AI background removal.**
 No uploads. No servers. No tracking. Just your browser and your GPU/CPU.
 
-[Live Demo](https://marcantero.github.io/clearcut-ai-background-remover/) · [Report a Bug](https://github.com/marcantero/ClearCut/issues) · [Request a Feature](https://github.com/marcantero/ClearCut/issues)
+[Website](https://marcantero.github.io/clearcut-ai-background-remover/) · [Report a Bug](https://github.com/marcantero/ClearCut/issues) · [Request a Feature](https://github.com/marcantero/ClearCut/issues)
 
 </div>
 
@@ -174,10 +174,9 @@ Contributions, issues, and feature requests are welcome. Feel free to check the 
 <br />
 
 ## License
-
-<!-- Add your chosen license here, e.g.: This project is licensed under the MIT License — see the LICENSE file for details. -->
-This project does not currently specify a license. Add a `LICENSE` file and update this section accordingly.
-
+ 
+This project is licensed under the **Apache License 2.0** — see the [LICENSE](./LICENSE) file for details.
+ 
 <br />
 
 ## Acknowledgments
