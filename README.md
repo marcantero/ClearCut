@@ -11,6 +11,7 @@
 <a href="https://marcantero.github.io/ClearCut/">
   <img src="./public/preview.png" alt="ClearCut banner" width="100%" />
 </a>
+
 **Privacy-first, in-browser AI background removal.**
 No uploads. No servers. No tracking. Just your browser and your GPU/CPU.
 
