@@ -33,6 +33,8 @@ export function useBackgroundWorker(
     processingStatus: 'idle',
   });
 
+  const [activeModelId, setActiveModelId] = useState<string | null>(null);
+
   const workerRef = useRef<Worker | null>(null);
   const lastProgressUpdateRef = useRef(0); // <-- CLAU: Evita saturar Sileo
 
@@ -126,7 +128,7 @@ export function useBackgroundWorker(
     worker.addEventListener('message', handleMessage);
     worker.addEventListener('error', handleError);
     worker.postMessage({ type: 'reset' } as WorkerIncomingMessage);
-    worker.postMessage({ type: 'init' } as WorkerIncomingMessage);
+    // worker.postMessage({ type: 'init' } as WorkerIncomingMessage); // Auto-init removed
 
     return () => {
       worker.removeEventListener('message', handleMessage);
@@ -137,9 +139,19 @@ export function useBackgroundWorker(
 
 
 
-  const processImage = (id: string, imageData: ImageData) => {
-    workerRef.current?.postMessage({ type: 'process-image', id, imageData } as WorkerIncomingMessage);
+  const initModel = (modelId: string) => {
+    setActiveModelId(modelId);
+    const message: WorkerIncomingMessage = { type: 'init', modelId };
+    workerRef.current?.postMessage(message);
   };
 
-  return { state, setState, processImage };
+  // The model is passed explicitly: reading `activeModelId` here would see a stale
+  // value when called right after `initModel` in the same event handler.
+  const processImage = (id: string, imageData: ImageData, modelId: string) => {
+    setActiveModelId(modelId);
+    const message: WorkerIncomingMessage = { type: 'process-image', id, imageData, modelId };
+    workerRef.current?.postMessage(message);
+  };
+
+  return { state, setState, initModel, processImage, activeModelId };
 }

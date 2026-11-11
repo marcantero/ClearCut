@@ -10,6 +10,36 @@ import {
 } from './lib/imageUtils';
 import { useBackgroundWorker } from './hooks/useBackgroundWorker';
 
+const MODELS = [
+  {
+    id: 'briaai/RMBG-1.4',
+    name: 'RMBG-1.4',
+    description: 'State-of-the-art accuracy. Best for complex subjects and fine details.',
+    icon: '✨',
+    badge: 'Recommended',
+    color: 'from-cyan-500 to-teal-400',
+    bg: 'bg-cyan-500/10'
+  },
+  {
+    id: 'onnx-community/BiRefNet-ONNX',
+    name: 'BiRefNet',
+    description: 'High fidelity edges and ultra-precise segmentation.',
+    icon: '🎯',
+    badge: 'High Quality',
+    color: 'from-indigo-500 to-purple-400',
+    bg: 'bg-indigo-500/10'
+  },
+  {
+    id: 'Xenova/modnet',
+    name: 'MODNet',
+    description: 'Lightweight, fast, and optimized for smooth performance.',
+    icon: '⚡',
+    badge: 'Fastest',
+    color: 'from-amber-500 to-orange-400',
+    bg: 'bg-amber-500/10'
+  }
+];
+
 function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof document !== 'undefined') {
@@ -57,7 +87,31 @@ function App() {
     setAnimationKey(id);
   }, []);
 
-  const { state, setState, processImage } = useBackgroundWorker(latestRequestIdRef, handleWorkerSuccess);
+  const { state, setState, processImage, initModel, activeModelId } = useBackgroundWorker(latestRequestIdRef, handleWorkerSuccess);
+
+
+  // Default to RMBG-1.4, just like ClearUp defaults to Real-ESRGAN x4+
+  const [selectedModel, setSelectedModel] = useState<string>('briaai/RMBG-1.4');
+
+  const runProcessing = (imageData: ImageData, modelId: string) => {
+    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    latestRequestIdRef.current = requestId;
+    // The worker loads the model on demand before processing.
+    processImage(requestId, imageData, modelId);
+    setState((prev) => ({ ...prev, processingStatus: 'processing' }));
+  };
+
+  const onSelectModel = (modelId: string) => {
+    if (modelId === selectedModel) return;
+    setSelectedModel(modelId);
+    if (originalImageData) {
+      // Re-run the current image with the newly selected model.
+      setIsEditing(false);
+      runProcessing(originalImageData, modelId);
+    } else if (activeModelId !== modelId) {
+      initModel(modelId);
+    }
+  };
 
   const onFileSelected = async (file: File) => {
     setState((prev) => ({ ...prev, uploadStatus: 'uploading', processingStatus: 'idle' }));
@@ -69,10 +123,7 @@ function App() {
       setAnimationKey(''); setIsEditing(false);
       setState((prev) => ({ ...prev, uploadStatus: 'loaded' }));
 
-      const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      latestRequestIdRef.current = requestId;
-      processImage(requestId, imageData);
-      setState((prev) => ({ ...prev, processingStatus: 'processing' }));
+      runProcessing(imageData, selectedModel);
     } catch {
       sileo.error({ title: 'File error', description: 'Could not load image.' });
       setState((prev) => ({ ...prev, uploadStatus: 'idle', processingStatus: 'error' }));
@@ -173,7 +224,7 @@ function App() {
             <span className={`h-1.5 w-1.5 rounded-full ${
               state.modelStatus === 'ready' ? 'bg-emerald-500 dark:bg-emerald-400' : state.modelStatus === 'error' ? 'bg-red-500 dark:bg-red-400' : 'bg-amber-500 dark:bg-amber-400 animate-pulse'
             }`} />
-            {state.modelStatus === 'ready' ? 'On-device AI ready' : state.modelStatus === 'error' ? 'Model error' : 'Loading AI…'}
+            {state.modelStatus === 'ready' ? 'On-device AI ready' : state.modelStatus === 'error' ? 'Model error' : state.modelStatus === 'loading' ? 'Loading AI…' : 'No AI selected'}
           </span>
 
           <button
@@ -268,8 +319,29 @@ function App() {
               </p>
             </div>
 
+            <div className="flex flex-col gap-3">
+              <label className="text-sm font-semibold text-slate-900 dark:text-white">Select AI Model</label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {MODELS.map(model => (
+                  <button
+                    key={model.id}
+                    onClick={() => onSelectModel(model.id)}
+                    disabled={isProcessing}
+                    className={`flex flex-col text-left p-3.5 rounded-xl border transition-all ${
+                      selectedModel === model.id 
+                        ? 'border-cyan-500 bg-cyan-50 dark:bg-cyan-500/10 ring-1 ring-cyan-500 shadow-sm' 
+                        : 'border-slate-200 dark:border-white/10 hover:border-slate-300 dark:hover:border-white/20 bg-white dark:bg-white/[0.02]'
+                    } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    <span className={`text-sm font-semibold ${selectedModel === model.id ? 'text-cyan-700 dark:text-cyan-400' : 'text-slate-900 dark:text-white'}`}>{model.name}</span>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">{model.description}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <section className="rounded-2xl border border-slate-200 dark:border-white/[0.07] bg-white dark:bg-white/[0.03] p-5 shadow-sm dark:shadow-none transition-all">
-              <Dropzone onFileSelected={onFileSelected} disabled={isProcessing || state.modelStatus === 'idle' || state.modelStatus === 'loading'} />
+              <Dropzone onFileSelected={onFileSelected} disabled={isProcessing || state.modelStatus === 'loading'} />
             </section>
 
             {originalSrc && (
