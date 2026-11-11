@@ -1,10 +1,11 @@
 // Types shared with main thread (sense dependències externes)
-export type WorkerInitMessage = { type: 'init' };
+export type WorkerInitMessage = { type: 'init'; modelId: string };
 export type WorkerResetMessage = { type: 'reset' };
 export type WorkerProcessMessage = {
   type: 'process-image';
   id: string;
   imageData: ImageData;
+  modelId: string;
   /**
    * Optional threshold controlling how aggressively background pixels are removed.
    * Higher values treat more colours as background.
