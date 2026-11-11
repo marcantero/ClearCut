@@ -2,7 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Toaster, sileo } from 'sileo';
 import { Dropzone } from './components/Dropzone';
 import { ImageCompareSlider } from './components/ImageCompareSlider';
-import { MaskEditorOverlay } from './components/MaskEditorOverlay';
+import { EditorLayout } from './components/EditorLayout';
+import { Header } from './components/Header';
+import { LoadingOverlay } from './components/LoadingOverlay';
+import { ModelPicker } from './components/ModelPicker';
 import {
   canvasToPngBlob,
   composeFullResolution,
@@ -12,13 +15,7 @@ import {
   loadImageFile,
 } from './lib/imageUtils';
 import { detectBackend } from './lib/backend';
-import {
-  DEFAULT_MODEL_ID,
-  MODELS,
-  getDownloadSizeMb,
-  getModelConfig,
-  type Backend,
-} from './config/models';
+import { DEFAULT_MODEL_ID, type Backend } from './config/models';
 import { useBackgroundWorker } from './hooks/useBackgroundWorker';
 
 function App() {
@@ -185,8 +182,6 @@ function App() {
   const isProcessing = state.processingStatus === 'processing';
   const isDone = state.processingStatus === 'done';
   const canEdit = !!(originalSrc && aiResultImageData && originalImageData);
-  const selectedConfig = getModelConfig(selectedModel);
-  const selectedSizeMb = selectedConfig && backend ? getDownloadSizeMb(selectedConfig, backend) : undefined;
   const canReprocess = !!originalImageData && !isProcessing && selectedModel !== resultModelId;
 
 	return (
@@ -210,121 +205,20 @@ function App() {
 		<div className="absolute -bottom-[10%] left-[20%] h-[400px] w-[400px] rounded-full bg-indigo-500/20 blur-[128px] dark:bg-indigo-500/10 animate-breathe [animation-delay:-4s]" />
 		</div>
       {/* ── Header ───────────────────────────────────────────────────────── */}
-      <header
-        className={`sticky top-0 z-30 flex items-center justify-between px-5 sm:px-8 transition-all duration-500 ease-out ${
-          isEditing
-            ? 'py-2.5 border-b border-slate-200 dark:border-white/[0.05] bg-white/80 dark:bg-[#060a10]/95 backdrop-blur-xl'
-            : 'py-4 bg-transparent'
-        }`}
-      >
-		<div className="flex items-center gap-3">
-		{/* LOGO DEFINITIU */}
-		<div className="relative flex h-8 w-8 items-center justify-center">
-			<div 
-				className="w-full h-full object-contain text-slate-900 dark:text-white transition-colors duration-300"
-				dangerouslySetInnerHTML={{ 
-				__html: `
-					<svg viewBox="0 0 120 120" fill="currentColor">
-					<rect x="20" y="20" width="60" height="60" rx="12" fill="currentColor" />
-					<rect x="40" y="40" width="60" height="60" rx="12" fill="none" stroke="currentColor" stroke-width="8" />
-					<rect x="0" y="56" width="120" height="8" fill="currentColor" transform="rotate(-45 60 60)" />
-					</svg>
-				` 
-				}}
-			/>
-		</div>
-		
-		<div>
-			<span className="text-sm font-semibold tracking-tight text-slate-900 dark:text-white">ClearCut</span>
-			<span className="ml-2 hidden text-[11px] text-slate-500 sm:inline">Background remover</span>
-		</div>
-		</div>
-
-        <div className="flex items-center gap-2.5">
-			
-          <span className={`hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-medium sm:flex ${
-            state.modelStatus === 'ready'
-              ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500/20'
-              : state.modelStatus === 'error'
-              ? 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 ring-1 ring-cyan-500/20'
-              : 'bg-amber-500/10 text-amber-700 dark:text-amber-300 ring-1 ring-amber-500/20'
-          }`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${
-              state.modelStatus === 'ready' ? 'bg-emerald-500 dark:bg-emerald-400' : state.modelStatus === 'error' ? 'bg-red-500 dark:bg-red-400' : 'bg-amber-500 dark:bg-amber-400 animate-pulse'
-            }`} />
-            {state.modelStatus === 'ready' ? 'On-device AI ready' : state.modelStatus === 'error' ? 'Model error' : state.modelStatus === 'loading' ? 'Loading AI…' : 'AI loads on first image'}
-          </span>
-
-          <button
-            onClick={toggleTheme}
-            className="flex h-7 w-7 items-center justify-center rounded-full text-slate-600 dark:text-slate-400 ring-1 ring-slate-200 dark:ring-white/10 hover:bg-slate-200/60 dark:hover:bg-white/10 transition"
-            aria-label="Canviar tema"
-          >
-            {theme === 'dark' ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
-            ) : (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
-            )}
-          </button>
-
-          <a
-            href="https://github.com/NIU1710710/ClearCut"
-            target="_blank" rel="noreferrer"
-            className="flex h-7 items-center gap-1.5 rounded-full px-3 text-[11px] font-medium text-slate-600 dark:text-slate-400 ring-1 ring-slate-200 dark:ring-white/10 transition hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-white/10"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
-            GitHub
-          </a>
-        </div>
-      </header>
+      <Header isEditing={isEditing} modelStatus={state.modelStatus} theme={theme} onToggleTheme={toggleTheme} />
 
       {/* ── Main content ─────────────────────────────────────────────────── */}
       <main className={`flex-1 ${isEditing ? 'overflow-hidden' : ''}`}>
         
         {/* ── EDITOR MODE (Únic i exclusiu) ── */}
         {canEdit && isEditing && (
-          <div className="flex h-[calc(100vh-60px)] w-full flex-col overflow-hidden lg:flex-row">
-            <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-slate-100 dark:bg-[#04070d] lg:border-r border-slate-200 dark:border-white/[0.06] transition-colors duration-300">
-              <MaskEditorOverlay originalImageData={originalImageData!} aiResultImageData={aiResultImageData!} onRefined={onRefined} />
-            </div>
-
-            <aside className="flex w-full flex-col gap-5 overflow-y-auto border-t border-slate-200 dark:border-white/[0.06] bg-white dark:bg-[#080c14] px-5 py-5 lg:w-72 lg:border-t-0 xl:w-80">
-              <div>
-                <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400 dark:text-slate-500">Editing</p>
-                <h2 className="mt-1 text-base font-semibold text-slate-900 dark:text-slate-100">Refine edges</h2>
-                <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-                  Paint over areas where the AI missed. Restore brings back removed pixels, Erase removes extra background.
-                </p>
-              </div>
-
-              <div className="h-px bg-slate-100 dark:bg-white/[0.06]" />
-
-              <div className="space-y-2.5">
-                <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400 dark:text-slate-600">Tips</p>
-                {[
-                  { icon: '⚡', text: 'Smart brush auto-selects by colour similarity' },
-                  { icon: '🎯', text: 'Lower tolerance = more precise edges' },
-                  { icon: '↕', text: 'Adjust brush size for fine vs. broad strokes' },
-                ].map(({ icon, text }) => (
-                  <div key={text} className="flex items-start gap-2.5">
-                    <span className="mt-px text-sm leading-none">{icon}</span>
-                    <p className="text-[11px] leading-relaxed text-slate-500">{text}</p>
-                  </div>
-                ))}
-              </div>
-
-              <div className="h-px bg-slate-100 dark:bg-white/[0.06]" />
-
-              <div className="mt-auto flex flex-col gap-2.5">
-                <button type="button" onClick={onDownload} disabled={!aiResultImageData} className="flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 active:scale-[0.98] disabled:opacity-40">
-                  Download PNG
-                </button>
-                <button type="button" onClick={onExitEditor} className="flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-600 dark:text-slate-400 ring-1 ring-slate-200 dark:ring-white/10 hover:bg-slate-100 dark:hover:bg-white/5 transition">
-                  ← Back to preview
-                </button>
-              </div>
-            </aside>
-          </div>
+          <EditorLayout
+            originalImageData={originalImageData!}
+            aiResultImageData={aiResultImageData!}
+            onRefined={onRefined}
+            onDownload={onDownload}
+            onExit={onExitEditor}
+          />
         )}
 
         {/* ── DEFAULT MODE ── */}
@@ -347,43 +241,15 @@ function App() {
               </p>
             </div>
 
-            <div className="flex flex-col gap-3">
-              <label className="text-sm font-semibold text-slate-900 dark:text-white">Select AI Model</label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {MODELS.map(model => (
-                  <button
-                    key={model.id}
-                    onClick={() => onSelectModel(model.id)}
-                    disabled={isProcessing}
-                    className={`flex flex-col text-left p-3.5 rounded-xl border transition-all ${
-                      selectedModel === model.id 
-                        ? 'border-cyan-500 bg-cyan-50 dark:bg-cyan-500/10 ring-1 ring-cyan-500 shadow-sm' 
-                        : 'border-slate-200 dark:border-white/10 hover:border-slate-300 dark:hover:border-white/20 bg-white dark:bg-white/[0.02]'
-                    } ${isProcessing ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
-                    <span className={`text-sm font-semibold ${selectedModel === model.id ? 'text-cyan-700 dark:text-cyan-400' : 'text-slate-900 dark:text-white'}`}>{model.name}</span>
-                    <span className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">{model.description}</span>
-                    {backend && getDownloadSizeMb(model, backend) !== undefined && (
-                      <span className="mt-2 text-[10px] font-medium text-slate-400 dark:text-slate-500">
-                        ~{getDownloadSizeMb(model, backend)} MB download · {backend === 'wasm' ? 'CPU' : 'GPU'}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-              {canReprocess && selectedConfig && (
-                <button
-                  type="button"
-                  onClick={onReprocess}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 active:scale-[0.98]"
-                >
-                  {resultModelId ? `Re-process with ${selectedConfig.name}` : `Remove background with ${selectedConfig.name}`}
-                  {selectedSizeMb !== undefined && (
-                    <span className="text-[11px] font-medium opacity-70">(~{selectedSizeMb} MB if not cached)</span>
-                  )}
-                </button>
-              )}
-            </div>
+            <ModelPicker
+              selectedModel={selectedModel}
+              resultModelId={resultModelId}
+              backend={backend}
+              isProcessing={isProcessing}
+              canReprocess={canReprocess}
+              onSelect={onSelectModel}
+              onReprocess={onReprocess}
+            />
 
             <section className="rounded-2xl border border-slate-200 dark:border-white/[0.07] bg-white dark:bg-white/[0.03] p-5 shadow-sm dark:shadow-none transition-all">
               <Dropzone onFileSelected={onFileSelected} disabled={isProcessing || state.modelStatus === 'loading'} />
@@ -449,67 +315,16 @@ function App() {
         )}
       </main>
       
-      {/* ── Toaster nativa 100% calibrada ── */}
+      {/* sileo's Toaster only supports position, offset, theme and default options. */}
       <Toaster
         position="bottom-left"
-        expand
-        closeButton
         offset={20}
-        gap={10}
-        visibleToasts={4}
         theme={theme === 'dark' ? 'light' : 'dark'}
-        toastOptions={{
-          duration: 3500,
-          classNames: {
-            toast: '!rounded-2xl border bg-white text-slate-900 border-slate-200 shadow-xl dark:bg-[#0b1220] dark:text-slate-50 dark:border-red-500/20 dark:shadow-[0_20px_60px_rgba(0,0,0,0.5)] !backdrop-blur-xl transition-all duration-300',
-            title: '!font-semibold text-slate-900 dark:text-white',
-            description: 'text-slate-500 dark:text-slate-400',
-            icon: 'text-cyan-500 dark:text-cyan-400',
-            success: '!border-emerald-500/30',
-            error: '!border-red-500/30',
-            warning: '!border-amber-500/30',
-            info: '!border-red-500/30',
-            closeButton: 'bg-slate-50 dark:bg-[#0f172a] text-slate-500 dark:text-slate-400 border-slate-200 dark:border-cyan-500/15 hover:bg-slate-100 dark:hover:bg-[#1e293b]',
-          },
-        }}
+        options={{ duration: 3500 }}
       />
 
-      {/* Model Loading Visual Overlay */}
       {state.modelStatus === 'loading' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/80 dark:bg-[#060a10]/80 backdrop-blur-md transition-all duration-500">
-          <div className="flex w-full max-w-sm flex-col items-center justify-center space-y-6 rounded-3xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-900/50 p-8 shadow-2xl dark:shadow-[0_0_80px_rgba(248,113,113,0.15)] text-center animate-[fade-in_300ms_ease-out_forwards]">
-            
-            <div className="relative flex h-20 w-20 items-center justify-center">
-              <div className="absolute inset-0 rounded-full border-4 border-slate-100 dark:border-slate-800" />
-              <div 
-                className="absolute inset-0 rounded-full border-4 border-transparent border-t-cyan-500 border-r-cyan-500 animate-spin transition-all duration-300"
-                style={{ transform: `rotate(${(state.modelProgress || 0) * 3.6}deg)` }}
-              />
-              <span className="text-xl font-bold text-slate-900 dark:text-white">
-                {state.modelProgress || 0}<span className="text-sm opacity-60">%</span>
-              </span>
-            </div>
-
-            <div className="space-y-2">
-              <h3 className="text-lg font-bold tracking-tight text-slate-900 dark:text-white">
-                Loading AI Model
-              </h3>
-              <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
-                {state.modelPhase || 'Downloading weights...'}
-              </p>
-              <p className="text-[11px] opacity-60">
-                This only happens once. The model runs 100% on-device.
-              </p>
-            </div>
-            
-            <div className="w-full h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-              <div 
-                className="h-full bg-gradient-to-r from-cyan-500 to-teal-400 transition-all duration-300 ease-out"
-                style={{ width: `${state.modelProgress || 0}%` }}
-              />
-            </div>
-          </div>
-        </div>
+        <LoadingOverlay progress={state.modelProgress} phase={state.modelPhase} />
       )}
     </div>
   );

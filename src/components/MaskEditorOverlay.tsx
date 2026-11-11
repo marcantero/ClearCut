@@ -141,6 +141,9 @@ export function MaskEditorOverlay({
       overlayCanvasRef.current.height = aiResultImageData.height;
     }
     drawResultOnDisplay(aiResultImageData);
+    // overlayCanvasRef is a stable ref from useMaskEditor (declared below), so it can't
+    // be listed here without a temporal-dead-zone error, and doesn't need to be.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aiResultImageData, drawResultOnDisplay]);
 
   const applyRefinement = useCallback(() => {
@@ -221,7 +224,7 @@ export function MaskEditorOverlay({
     historyRef.current      = nextHistory;
     historyIndexRef.current = nextHistory.length - 1;
     syncHistoryUI();
-  }, [getHiddenCanvases, syncHistoryUI]);
+  }, [getHiddenCanvases, overlayCanvasRef, syncHistoryUI]);
 
   useEffect(() => {
     const { restoreCanvas, eraseCanvas } = getHiddenCanvases();
@@ -236,7 +239,7 @@ export function MaskEditorOverlay({
     historyRef.current      = [step0];
     historyIndexRef.current = 0;
     syncHistoryUI();
-  }, [aiResultImageData, getHiddenCanvases, syncHistoryUI]);
+  }, [aiResultImageData, getHiddenCanvases, overlayCanvasRef, syncHistoryUI]);
 
   const applyHistoryStep = useCallback((targetIndex: number) => {
     const step = historyRef.current[targetIndex];
@@ -261,7 +264,7 @@ export function MaskEditorOverlay({
       drawResultOnDisplay(aiResultImageData);
       onRefinedRef.current(aiResultImageData);
     }
-  }, [getHiddenCanvases, syncHistoryUI, notifyExternalEdit, aiResultImageData, originalImageData, drawResultOnDisplay]);
+  }, [getHiddenCanvases, overlayCanvasRef, syncHistoryUI, notifyExternalEdit, aiResultImageData, originalImageData, drawResultOnDisplay]);
 
   const undo = useCallback(() => {
     if (historyIndexRef.current <= 0) return;

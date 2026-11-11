@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { mergeCorrectionMasks } from './correctionMask';
 
 export type BrushMode = 'restore' | 'erase';
 
@@ -167,29 +168,17 @@ export function useMaskEditor({
     const eCanvas = eraseCanvasRef.current;
     if (!rCanvas || !eCanvas || rCanvas.width === 0) return null;
 
-    const { width: w, height: h } = rCanvas;
-    const out  = new ImageData(w, h);
-
     const rCtx = rCanvas.getContext('2d');
     const eCtx = eCanvas.getContext('2d');
     if (!rCtx || !eCtx) return null;
 
-    const rData = rCtx.getImageData(0, 0, w, h).data;
-    const eData = eCtx.getImageData(0, 0, w, h).data;
-    const o     = out.data;
-
-    for (let i = 0; i < o.length; i += 4) {
-      const hasErase   = eData[i + 3] > 0;
-      const hasRestore = rData[i + 3] > 0;
-
-      if (hasErase) {
-        o[i] = 0; o[i+1] = 0; o[i+2] = 0; o[i+3] = 255;
-      } else if (hasRestore) {
-        o[i] = 255; o[i+1] = 255; o[i+2] = 255; o[i+3] = 255;
-      }
-    }
-
-    return out;
+    const { width: w, height: h } = rCanvas;
+    return mergeCorrectionMasks(
+      rCtx.getImageData(0, 0, w, h).data,
+      eCtx.getImageData(0, 0, w, h).data,
+      w,
+      h,
+    );
   }, []);
 
   const clearEdits = useCallback(() => {

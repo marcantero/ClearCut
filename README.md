@@ -27,9 +27,6 @@ No uploads. No servers. No tracking. Just your browser and your GPU/CPU.
   light and dark mode if possible, or pick the mode you prefer as the
   primary showcase. Ideal size: 1280×800px or similar 16:10 ratio.
 -->
-<div align="center">
-  <img src="./assets/clearcut-demo.gif" alt="ClearCut demo — drag, process, and compare" width="85%" />
-</div>
 
 <br />
 
@@ -123,9 +120,13 @@ npm run dev
 | Command | Description |
 |---|---|
 | `npm run dev` | Starts the Vite development server with hot reload |
-| `npm run build` | Builds the app for production into `dist/` |
+| `npm run build` | Type-checks and builds the app for production into `dist/` |
 | `npm run preview` | Serves the production build locally for testing |
-| `npm run deploy` | Builds and publishes the app to GitHub Pages |
+| `npm run typecheck` | Runs the TypeScript compiler without emitting files |
+| `npm run lint` | Lints the code with ESLint |
+| `npm test` | Runs the unit tests with Vitest (`npm run test:watch` for watch mode) |
+
+Every push to `main` is linted, tested, built and deployed to GitHub Pages by the [CI & Deploy workflow](.github/workflows/deploy.yml).
 
 <br />
 
@@ -136,13 +137,24 @@ ClearCut/
 ├── public/                  # Static assets
 ├── src/
 │   ├── components/
+│   │   ├── Header.tsx             # Logo, model status, theme toggle
+│   │   ├── ModelPicker.tsx        # Model cards and re-process button
 │   │   ├── Dropzone.tsx           # Drag-and-drop image upload
 │   │   ├── ImageCompareSlider.tsx # Before/after interactive slider
-│   │   └── MaskEditorOverlay.tsx  # Smart brush mask refinement editor
+│   │   ├── EditorLayout.tsx       # Editor view: canvas + sidebar
+│   │   ├── MaskEditorOverlay.tsx  # Smart brush mask refinement editor
+│   │   └── LoadingOverlay.tsx     # Model download progress
+│   ├── config/
+│   │   └── models.ts              # Available models, sizes, precision fallback
 │   ├── hooks/
-│   │   └── useBackgroundWorker.ts # Web Worker lifecycle & messaging
+│   │   └── useBackgroundWorker.tsx # Web Worker lifecycle & messaging
 │   ├── lib/
-│   │   └── imageUtils.ts          # Image decoding / encoding helpers
+│   │   ├── imageUtils.ts          # Image loading, full-res export, encoding
+│   │   ├── refineMask.ts          # Applies user corrections to the AI result
+│   │   ├── correctionMask.ts      # Merges restore/erase masks
+│   │   └── backend.ts             # WebGPU / WASM detection
+│   ├── workers/
+│   │   └── backgroundRemover.worker.ts # Model loading and inference
 │   ├── App.tsx               # Application shell and view orchestration
 │   └── index.css             # Tailwind layers + custom UI animations
 ├── package.json
@@ -179,17 +191,17 @@ Tasks are grouped by priority. Tick them off as they land.
 
 ### 🟡 P2 — Tooling & code quality
 
-- [ ] Type-check on build (`tsc --noEmit && vite build`) and add a `typecheck` script
-- [ ] Add ESLint (`typescript-eslint` + `react-hooks`)
-- [ ] Add Vitest unit tests for `refineMask`, `getScaledSize` and the correction-mask merge
-- [ ] GitHub Action to build and deploy to GitHub Pages
-- [ ] Remove dead code: `ModelStatusBanner.tsx`, `useFloodFill.ts`, unused `threshold` field
-- [ ] Move `MODELS` to `src/config/models.ts` and split `App.tsx` into `Header`, `ModelPicker`, `EditorLayout`, `LoadingOverlay`
-- [ ] Fix inconsistent config: `package.json` `homepage` vs Vite `base`, header GitHub link, `.gitignore` entries for tracked public assets, missing `assets/clearcut-demo.gif`
+- [x] Type-check on build (`tsc --noEmit && vite build`) and add a `typecheck` script
+- [x] Add ESLint (`typescript-eslint` + `react-hooks`)
+- [x] Add Vitest unit tests for `refineMask`, `getScaledSize` and the correction-mask merge
+- [x] GitHub Action to build and deploy to GitHub Pages
+- [x] Remove dead code: `ModelStatusBanner.tsx`, `useFloodFill.ts`, unused `threshold` field
+- [x] Move `MODELS` to `src/config/models.ts` and split `App.tsx` into `Header`, `ModelPicker`, `EditorLayout`, `LoadingOverlay`
+- [x] Fix inconsistent config: `package.json` `homepage` vs Vite `base`, header GitHub link, missing `assets/clearcut-demo.gif`
 
 ### 🔵 P3 — UI, accessibility & consistency
 
-- [ ] Fix the `Toaster` setup: it uses `sonner`-style props (`id`, `expand`, `toastOptions`, …) that `sileo` silently ignores
+- [x] Fix the `Toaster` setup: it uses `sonner`-style props (`id`, `expand`, `toastOptions`, …) that `sileo` silently ignores
 - [ ] Remove leftovers of the old red theme (error status pill, toast borders, loading overlay shadow) and fix the inverted toast theme
 - [ ] Make the Dropzone readable in light mode
 - [ ] Dropzone: paste image from clipboard (Ctrl+V), toast on non-image files, keyboard accessibility

@@ -6,11 +6,6 @@ export type WorkerProcessMessage = {
   id: string;
   imageData: ImageData;
   modelId: string;
-  /**
-   * Optional threshold controlling how aggressively background pixels are removed.
-   * Higher values treat more colours as background.
-   */
-  threshold?: number;
 };
 
 export type WorkerIncomingMessage = WorkerInitMessage | WorkerResetMessage | WorkerProcessMessage;

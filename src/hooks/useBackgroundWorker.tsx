@@ -5,7 +5,6 @@ import type {
   WorkerIncomingMessage,
   WorkerOutgoingMessage,
   WorkerResultMessage,
-  WorkerStatusMessage,
 } from '../workers/backgroundRemover.types';
 
 type UploadStatus = 'idle' | 'uploading' | 'loaded';
@@ -20,8 +19,6 @@ export type WorkerState = {
   processingStatus: ProcessingStatus;
 };
 
-export const IMAGE_PROCESS_ID = 'clearcut-active-image-job';
-const TOAST_MODEL_ID = 'clear-cut-model-loader';
 
 export function useBackgroundWorker(
   latestRequestIdRef: React.MutableRefObject<string | null>,
@@ -68,7 +65,6 @@ export function useBackgroundWorker(
           // Esperem 800ms abans de l'èxit per no ser bruscos
           setTimeout(() => {
             sileo.success({
-              id: TOAST_MODEL_ID,
               title: 'AI model ready',
               description: 'Everything runs locally.',
               duration: 3000,
@@ -76,7 +72,7 @@ export function useBackgroundWorker(
           }, 800);
         } else if (message.status === 'error') {
           setState((prev) => ({ ...prev, modelStatus: 'error' }));
-          sileo.error({ id: TOAST_MODEL_ID, title: 'Error', description: message.message });
+          sileo.error({ title: 'Error', description: message.message });
         }
         return;
       }
@@ -94,7 +90,6 @@ export function useBackgroundWorker(
         if (latestRequestIdRef.current && id !== latestRequestIdRef.current) return;
 
         sileo.success({
-          id: IMAGE_PROCESS_ID,
           title: 'Background removed',
           duration: 2200,
         });
@@ -106,7 +101,6 @@ export function useBackgroundWorker(
 
       if (message.type === 'error') {
         sileo.error({
-          id: IMAGE_PROCESS_ID,
           title: 'Processing error',
           description: message.message,
           duration: 4000,
@@ -118,7 +112,6 @@ export function useBackgroundWorker(
     const handleError = (event: ErrorEvent) => {
       event.preventDefault();
       sileo.error({
-        id: TOAST_MODEL_ID,
         title: 'Worker error',
         description: 'Please reload the page.',
       });
