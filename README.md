@@ -43,12 +43,14 @@ This project was built as a personal exploration of running production-grade com
 ## Key Features
 
 - **100% local processing** — the AI model is downloaded once and runs entirely in your browser. No image data ever leaves the tab.
-- **Drag-and-drop upload** — simple, fast image input via a dedicated dropzone component.
+- **Drag-and-drop, paste or browse** — drop an image, paste it with Ctrl+V, or pick a file (keyboard accessible).
+- **Multiple models** — RMBG-1.4, BiRefNet and MODNet, with download sizes shown and automatic fp16/fp32/q8 precision per device.
 - **Background removal powered by Transformers.js** — runs a segmentation model on-device using WebAssembly/WebGPU, offloaded to a Web Worker to keep the UI thread free.
 - **Before/after compare slider** — interactively reveal the processed result against the original image.
-- **Smart brush mask editor** — a Quick Selection–style tool that lets you restore or erase mask areas with adjustable brush size and color-similarity tolerance.
+- **Smart brush mask editor** — a Quick Selection–style tool that lets you restore or erase mask areas with adjustable brush size and color-similarity tolerance. Supports touch and pen, zoom & pan, and keyboard shortcuts.
+- **Background replacement** — keep it transparent, or put the subject on a solid colour, a blurred copy of the original photo, or your own image.
 - **Light / dark mode** — fully themed interface with persisted user preference.
-- **One-click PNG export** — download the final cut-out image with a transparent background.
+- **Full-resolution PNG export** — the model runs at ≤1024 px, but the mask is upscaled and applied to the original photo (up to 4096 px).
 - **Zero backend** — a fully static site, deployable to GitHub Pages or any static host.
 
 <br />
@@ -61,9 +63,6 @@ This project was built as a personal exploration of running production-grade com
   most technically interesting feature, so a clear, well-lit screenshot
   (or short GIF) helps a lot here. Approx. 1280×720px.
 -->
-<div align="center">
-  <img src="./assets/clearcut-editor.png" alt="ClearCut mask refinement editor with smart brush" width="85%" />
-</div>
 
 <br />
 
@@ -212,7 +211,7 @@ Tasks are grouped by priority. Tick them off as they land.
 
 ### ✨ New features
 
-- [ ] Background replacement (solid colour, blur, custom image)
+- [x] Background replacement (solid colour, blur, custom image)
 - [ ] Additional export formats (WebP, JPEG with background, auto-crop to subject)
 - [ ] Copy result to clipboard
 - [ ] Batch processing with ZIP download

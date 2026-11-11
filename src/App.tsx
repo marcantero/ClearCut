@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Toaster, sileo } from 'sileo';
 import { Dropzone } from './components/Dropzone';
 import { ImageCompareSlider } from './components/ImageCompareSlider';
@@ -11,11 +11,12 @@ import {
   composeFullResolution,
   downloadBlob,
   imageDataToCanvas,
-  imageDataToObjectUrl,
   loadImageFile,
 } from './lib/imageUtils';
 import { detectBackend } from './lib/backend';
 import { DEFAULT_MODEL_ID, type Backend } from './config/models';
+import { TRANSPARENT, composeBackground, type Background } from './lib/background';
+import { BackgroundPicker } from './components/BackgroundPicker';
 import { useBackgroundWorker } from './hooks/useBackgroundWorker';
 
 function App() {
@@ -61,6 +62,12 @@ function App() {
   /** Editor output committed when leaving the editor; drives the preview. */
   const [refinedImageData, setRefinedImageData] = useState<ImageData | null>(null);
   const [displaySrc, setDisplaySrc] = useState<string | null>(null);
+  const [background, setBackground] = useState<Background>(TRANSPARENT);
+  /** Working-resolution original as a canvas, for compositing the preview background. */
+  const workingOriginalCanvas = useMemo(
+    () => (originalImageData ? imageDataToCanvas(originalImageData) : null),
+    [originalImageData],
+  );
 
   const [animationKey, setAnimationKey] = useState<string>('');
   const [isEditing, setIsEditing] = useState(false);
@@ -85,7 +92,8 @@ function App() {
 
   const { state, setState, processImage, cancelModelLoading } = useBackgroundWorker(latestRequestIdRef, handleWorkerSuccess);
 
-  // Preview URL: encoded asynchronously as a PNG blob (no base64), revoked when replaced.
+  // Preview URL (result over the chosen background): encoded asynchronously as a PNG blob
+  // (no base64), revoked when replaced.
   useEffect(() => {
     const data = refinedImageData ?? aiResultImageData;
     if (!data) {
@@ -94,7 +102,13 @@ function App() {
     }
     let cancelled = false;
     let url: string | null = null;
-    imageDataToObjectUrl(data)
+    (async () => {
+      const subject = imageDataToCanvas(data);
+      const composed = workingOriginalCanvas
+        ? composeBackground(subject, workingOriginalCanvas, background)
+        : subject;
+      return URL.createObjectURL(await canvasToPngBlob(composed));
+    })()
       .then((u) => {
         if (cancelled) URL.revokeObjectURL(u);
         else { url = u; setDisplaySrc(u); }
@@ -104,7 +118,7 @@ function App() {
       cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [refinedImageData, aiResultImageData]);
+  }, [refinedImageData, aiResultImageData, workingOriginalCanvas, background]);
 
   // Release the uploaded file's object URL when it's replaced or on unmount.
   useEffect(() => () => { if (originalSrc) URL.revokeObjectURL(originalSrc); }, [originalSrc]);
@@ -156,10 +170,13 @@ function App() {
     const result = refinedRef.current ?? aiResultImageData;
     if (!result) return;
     try {
-      const canvas = fullCanvasRef.current
-        ? composeFullResolution(fullCanvasRef.current, result)
-        : imageDataToCanvas(result);
-      downloadBlob(await canvasToPngBlob(canvas), 'clearcut-background-removed.png');
+      // Full resolution when available; the background source must match the subject's size.
+      const full = fullCanvasRef.current;
+      const subject = full ? composeFullResolution(full, result) : imageDataToCanvas(result);
+      const original = full ?? workingOriginalCanvas;
+      const canvas = original ? composeBackground(subject, original, background) : subject;
+      const filename = background.kind === 'transparent' ? 'clearcut-background-removed.png' : 'clearcut-new-background.png';
+      downloadBlob(await canvasToPngBlob(canvas), filename);
       sileo.success({
         title: 'Downloaded',
         description: `PNG saved successfully (${canvas.width}×${canvas.height}).`,
@@ -299,6 +316,8 @@ function App() {
                     </div>
                   </div>
                 )}
+
+                {aiResultImageData && <BackgroundPicker value={background} onChange={setBackground} />}
 
                 {canEdit && (
                   <button type="button" onClick={() => setIsEditing(true)} className="group flex w-full items-center justify-between rounded-xl border border-slate-200 dark:border-white/[0.07] bg-white dark:bg-white/[0.03] px-4 py-3 text-left hover:border-cyan-500/30 hover:bg-cyan-50 dark:hover:bg-cyan-500/[0.04] transition shadow-sm dark:shadow-none">
