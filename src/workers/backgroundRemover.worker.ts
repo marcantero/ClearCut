@@ -1,5 +1,7 @@
 import { pipeline, RawImage, env } from '@huggingface/transformers';
 import type { WorkerIncomingMessage, WorkerOutgoingMessage } from './backgroundRemover.types';
+import { getDtypeCandidates, getModelConfig } from '../config/models';
+import { detectBackend } from '../lib/backend';
 
 // Re-export types for main thread to import
 export type {
@@ -25,7 +27,7 @@ let segmenterPromise: Promise<any> | null = null;
 let activeModelId: string | null = null;
 let currentDevice: 'webgpu' | 'wasm' = 'wasm';
 
-const modelLabel = (modelId: string) => modelId.split('/').pop() ?? modelId;
+const modelLabel = (modelId: string) => getModelConfig(modelId)?.name ?? modelId;
 
 function makeProgressHandler(modelId: string) {
   return (data: any) => {
@@ -47,43 +49,39 @@ function makeProgressHandler(modelId: string) {
   };
 }
 
-async function detectWebGPU(): Promise<boolean> {
-  try {
-    const gpu = (navigator as any).gpu;
-    if (!gpu) return false;
-    return !!(await gpu.requestAdapter());
-  } catch (e) {
-    console.warn('[Worker] Error checking WebGPU adapter:', e);
-    return false;
-  }
-}
-
 async function loadSegmenter(modelId: string) {
-  const isWebGPUSupported = await detectWebGPU();
-  currentDevice = isWebGPUSupported ? 'webgpu' : 'wasm';
-  // If we're in WASM (CPU), use 'q8' (quantized to 8 bits) to avoid hanging the tab
-  const dtype = isWebGPUSupported ? 'fp32' : 'q8';
+  const model = getModelConfig(modelId);
+  if (!model) throw new Error(`Unknown model: ${modelId}`);
 
-  console.log(`[Worker] Initializing ${modelId} with device: ${currentDevice} and precision: ${dtype}`);
+  const backend = await detectBackend();
+  currentDevice = backend === 'wasm' ? 'wasm' : 'webgpu';
+  const candidates = getDtypeCandidates(model, backend);
 
   post({
     type: 'status',
     status: 'loading-model',
-    message: isWebGPUSupported
-      ? 'Loading high-precision model (WebGPU)...'
+    message: currentDevice === 'webgpu'
+      ? 'Loading model (WebGPU)...'
       : 'WebGPU not detected. Loading CPU mode (WASM)...',
   });
 
-  try {
-    return await pipeline('background-removal', modelId, {
-      device: currentDevice as any,
-      dtype: dtype as any,
-      progress_callback: makeProgressHandler(modelId),
-    });
-  } catch (error: any) {
-    console.error(`[Worker] Critical error loading model with ${currentDevice}:`, error);
-    throw new Error(`Could not load the model. Detail: ${error?.message || error}`);
+  let lastError: unknown;
+  for (const dtype of candidates) {
+    try {
+      console.log(`[Worker] Initializing ${modelId} with device: ${currentDevice} and precision: ${dtype}`);
+      return await pipeline('background-removal', modelId, {
+        device: currentDevice as any,
+        dtype: dtype as any,
+        progress_callback: makeProgressHandler(modelId),
+      });
+    } catch (error) {
+      console.warn(`[Worker] Loading ${modelId} as ${dtype} on ${currentDevice} failed:`, error);
+      lastError = error;
+    }
   }
+
+  const detail = (lastError as any)?.message || lastError || 'no compatible precision';
+  throw new Error(`Could not load the model. Detail: ${detail}`);
 }
 
 /** Releases the currently loaded pipeline (GPU/WASM memory). */

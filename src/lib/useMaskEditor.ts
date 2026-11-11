@@ -38,34 +38,24 @@ export function useMaskEditor({
   const lastPosRef   = useRef<{ x: number; y: number } | null>(null);
   const [hasEdits, setHasEdits] = useState(false);
 
-  // Initialize / resize all canvases when dimensions change
+  // (Re)create the hidden canvases and size all canvases when dimensions change.
+  // The masks are read back every frame (getImageData), so their contexts are created
+  // with `willReadFrequently` (CPU-backed: fast reads, no GPU readback). The context
+  // attributes are fixed by the first getContext() call, so it must happen here.
   useEffect(() => {
     if (width === 0 || height === 0) return;
+
+    restoreCanvasRef.current = document.createElement('canvas');
+    eraseCanvasRef.current   = document.createElement('canvas');
 
     for (const ref of [overlayCanvasRef, restoreCanvasRef, eraseCanvasRef]) {
       const c = ref.current;
       if (!c) continue;
       c.width  = width;
       c.height = height;
+      c.getContext('2d', { willReadFrequently: true });
     }
     setHasEdits(false);
-  }, [width, height]);
-
-  // Create hidden canvases once and resize
-  useEffect(() => {
-    restoreCanvasRef.current = document.createElement('canvas');
-    eraseCanvasRef.current   = document.createElement('canvas');
-    
-    if (width > 0 && height > 0) {
-      if (restoreCanvasRef.current) {
-        restoreCanvasRef.current.width = width;
-        restoreCanvasRef.current.height = height;
-      }
-      if (eraseCanvasRef.current) {
-        eraseCanvasRef.current.width = width;
-        eraseCanvasRef.current.height = height;
-      }
-    }
   }, [width, height]);
 
   const getScaledPos = useCallback(
@@ -142,7 +132,7 @@ export function useMaskEditor({
       setHasEdits(true);
       onStroke?.();
     },
-    [getScaledPos, paintSegment, onStroke, brushMode]
+    [getScaledPos, paintSegment, onStroke]
   );
 
   const onPointerMove = useCallback(

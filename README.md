@@ -169,13 +169,13 @@ Tasks are grouped by priority. Tick them off as they land.
 
 ### 🟠 P1 — Output quality & performance
 
-- [ ] Export at the original resolution (run the model at ≤1024 px, upscale the mask, apply it to the full-size image)
-- [ ] Use blob URLs (`toBlob` + `createObjectURL`) instead of base64 data URLs; download straight from `ImageData`
-- [ ] Delay `URL.revokeObjectURL` after triggering the download
-- [ ] Try `fp16` on WebGPU instead of `fp32` to reduce model download size
-- [ ] Show approximate model size on each card; don't start a heavy download on a simple card click
-- [ ] Mask editor: throttle the freehand brush with `requestAnimationFrame` and use `willReadFrequently` contexts
-- [ ] Mask editor: reduce undo history memory (currently ~250 MB at 1024² — store masks only, or dirty rectangles)
+- [x] Export at the original resolution (run the model at ≤1024 px, upscale the mask, apply it to the full-size image)
+- [x] Use blob URLs (`toBlob` + `createObjectURL`) instead of base64 data URLs; download straight from `ImageData`
+- [x] Delay `URL.revokeObjectURL` after triggering the download
+- [x] Try `fp16` on WebGPU instead of `fp32` to reduce model download size
+- [x] Show approximate model size on each card; don't start a heavy download on a simple card click
+- [x] Mask editor: throttle the freehand brush with `requestAnimationFrame` and use `willReadFrequently` contexts
+- [x] Mask editor: reduce undo history memory (currently ~250 MB at 1024² — store masks only, or dirty rectangles)
 
 ### 🟡 P2 — Tooling & code quality
 

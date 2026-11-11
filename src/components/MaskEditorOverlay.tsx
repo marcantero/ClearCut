@@ -20,7 +20,40 @@ const TOLERANCE_PRESETS = [
   { label: 'Max',   value: 140 },
 ] as const;
 
-type HistoryStep = { restore: ImageData; erase: ImageData; overlay: ImageData };
+/**
+ * Undo/redo snapshot. Each mask canvas only ever holds one colour (restore = white,
+ * erase = black, overlay = green tint), so storing the alpha channel (1 byte/px instead
+ * of 4) is lossless and cuts history memory by 4×.
+ */
+type HistoryStep = { restore: Uint8Array; erase: Uint8Array; overlay: Uint8Array };
+
+const RESTORE_RGB: RGB = [255, 255, 255];
+const ERASE_RGB: RGB   = [0, 0, 0];
+const OVERLAY_RGB: RGB = [52, 211, 153]; // must match the smart brush overlay colour
+
+type RGB = [number, number, number];
+
+function readAlpha(canvas: HTMLCanvasElement): Uint8Array | null {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  const alpha = new Uint8Array(canvas.width * canvas.height);
+  for (let i = 0, j = 3; i < alpha.length; i++, j += 4) alpha[i] = data[j];
+  return alpha;
+}
+
+function writeAlpha(canvas: HTMLCanvasElement, alpha: Uint8Array, [r, g, b]: RGB) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const img = new ImageData(canvas.width, canvas.height);
+  const d = img.data;
+  for (let i = 0, j = 0; i < alpha.length; i++, j += 4) {
+    const a = alpha[i];
+    if (a === 0) continue;
+    d[j] = r; d[j + 1] = g; d[j + 2] = b; d[j + 3] = a;
+  }
+  ctx.putImageData(img, 0, 0);
+}
 
 export function MaskEditorOverlay({
   originalImageData,
@@ -124,8 +157,8 @@ export function MaskEditorOverlay({
     return () => observer.disconnect();
   }, [applyRefinement]);
 
-  const handleBrushStroke = useCallback(() => { applyRefinement(); }, [applyRefinement]);
-
+  // Refinement reads both masks and recomposes the whole image, so it runs at most
+  // once per animation frame while painting, and is flushed when the stroke ends.
   const scheduleRefinement = useCallback(() => {
     if (pendingFrameRef.current !== null) return;
     pendingFrameRef.current = requestAnimationFrame(() => {
@@ -133,6 +166,20 @@ export function MaskEditorOverlay({
       applyRefinement();
     });
   }, [applyRefinement]);
+
+  const flushRefinement = useCallback(() => {
+    if (pendingFrameRef.current !== null) {
+      cancelAnimationFrame(pendingFrameRef.current);
+      pendingFrameRef.current = null;
+    }
+    applyRefinement();
+  }, [applyRefinement]);
+
+  useEffect(() => () => {
+    if (pendingFrameRef.current !== null) cancelAnimationFrame(pendingFrameRef.current);
+  }, []);
+
+  const handleBrushStroke = scheduleRefinement;
 
   const {
     canvasRef: overlayCanvasRef,
@@ -160,16 +207,11 @@ export function MaskEditorOverlay({
     const overlayCanvas = overlayCanvasRef.current;
     if (!restoreCanvas || !eraseCanvas || !overlayCanvas || restoreCanvas.width === 0) return;
 
-    const rCtx = restoreCanvas.getContext('2d');
-    const eCtx = eraseCanvas.getContext('2d');
-    const oCtx = overlayCanvas.getContext('2d');
-    if (!rCtx || !eCtx || !oCtx) return;
-
-    const step: HistoryStep = {
-      restore: rCtx.getImageData(0, 0, restoreCanvas.width, restoreCanvas.height),
-      erase:   eCtx.getImageData(0, 0, eraseCanvas.width, eraseCanvas.height),
-      overlay: oCtx.getImageData(0, 0, overlayCanvas.width, overlayCanvas.height),
-    };
+    const restore = readAlpha(restoreCanvas);
+    const erase   = readAlpha(eraseCanvas);
+    const overlay = readAlpha(overlayCanvas);
+    if (!restore || !erase || !overlay) return;
+    const step: HistoryStep = { restore, erase, overlay };
 
     const currIdx = historyIndexRef.current;
     const nextHistory = historyRef.current.slice(0, currIdx + 1);
@@ -185,16 +227,11 @@ export function MaskEditorOverlay({
     const { restoreCanvas, eraseCanvas } = getHiddenCanvases();
     const overlayCanvas = overlayCanvasRef.current;
     if (!restoreCanvas || !eraseCanvas || !overlayCanvas || restoreCanvas.width === 0) return;
-    const rCtx = restoreCanvas.getContext('2d');
-    const eCtx = eraseCanvas.getContext('2d');
-    const oCtx = overlayCanvas.getContext('2d');
-    if (!rCtx || !eCtx || !oCtx) return;
-
-    const step0: HistoryStep = {
-      restore: rCtx.getImageData(0, 0, restoreCanvas.width, restoreCanvas.height),
-      erase:   eCtx.getImageData(0, 0, eraseCanvas.width, eraseCanvas.height),
-      overlay: oCtx.getImageData(0, 0, overlayCanvas.width, overlayCanvas.height),
-    };
+    const restore = readAlpha(restoreCanvas);
+    const erase   = readAlpha(eraseCanvas);
+    const overlay = readAlpha(overlayCanvas);
+    if (!restore || !erase || !overlay) return;
+    const step0: HistoryStep = { restore, erase, overlay };
 
     historyRef.current      = [step0];
     historyIndexRef.current = 0;
@@ -207,9 +244,9 @@ export function MaskEditorOverlay({
     const { restoreCanvas, eraseCanvas } = getHiddenCanvases();
     const overlayCanvas = overlayCanvasRef.current;
 
-    restoreCanvas?.getContext('2d')?.putImageData(step.restore, 0, 0);
-    eraseCanvas?.getContext('2d')?.putImageData(step.erase, 0, 0);
-    overlayCanvas?.getContext('2d')?.putImageData(step.overlay, 0, 0);
+    if (restoreCanvas) writeAlpha(restoreCanvas, step.restore, RESTORE_RGB);
+    if (eraseCanvas)   writeAlpha(eraseCanvas, step.erase, ERASE_RGB);
+    if (overlayCanvas) writeAlpha(overlayCanvas, step.overlay, OVERLAY_RGB);
 
     historyIndexRef.current = targetIndex;
     syncHistoryUI();
@@ -264,17 +301,19 @@ export function MaskEditorOverlay({
     if (isPointerDownRef.current) {
       isPointerDownRef.current = false;
       brushPointerUp();
+      flushRefinement();
       captureSnapshot();
     } else brushPointerUp();
-  }, [brushPointerUp, captureSnapshot]);
+  }, [brushPointerUp, flushRefinement, captureSnapshot]);
 
   const handleBrushLeave = useCallback(() => {
     if (isPointerDownRef.current) {
       isPointerDownRef.current = false;
       brushPointerLeave();
+      flushRefinement();
       captureSnapshot();
     } else brushPointerLeave();
-  }, [brushPointerLeave, captureSnapshot]);
+  }, [brushPointerLeave, flushRefinement, captureSnapshot]);
 
   const { fillAt, createStrokeState, getScaledPos } = useSmartBrush();
 
@@ -330,21 +369,21 @@ export function MaskEditorOverlay({
 
   const handleSmartUp = useCallback(() => {
     strokeVisitedRef.current = null;
-    if (pendingFrameRef.current !== null) { cancelAnimationFrame(pendingFrameRef.current); pendingFrameRef.current = null; }
-    applyRefinement();
+    flushRefinement();
     if (isPointerDownRef.current) {
       isPointerDownRef.current = false;
       captureSnapshot();
     }
-  }, [applyRefinement, captureSnapshot]);
+  }, [flushRefinement, captureSnapshot]);
 
   const handleSmartLeave = useCallback(() => {
     strokeVisitedRef.current = null;
     if (isPointerDownRef.current) {
       isPointerDownRef.current = false;
+      flushRefinement();
       captureSnapshot();
     }
-  }, [captureSnapshot]);
+  }, [flushRefinement, captureSnapshot]);
 
   const canvasProps = activeTool === 'brush'
     ? { onMouseDown: handleBrushDown, onMouseMove: brushPointerMove, onMouseUp: handleBrushUp, onMouseLeave: handleBrushLeave }
