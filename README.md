@@ -155,10 +155,55 @@ ClearCut/
 
 ## Roadmap
 
-- [ ] Batch processing for multiple images
-- [ ] Additional export formats (WebP, JPEG with custom background color)
-- [ ] WebGPU acceleration toggle for supported browsers
-- [ ] Mobile-optimized touch gestures for the smart brush
+Tasks are grouped by priority. Tick them off as they land.
+
+### 🔴 P0 — Model selector bugs
+
+- [ ] Pass the model id explicitly to `processImage` (first upload failed with "No model selected" due to stale React state)
+- [ ] Fix the type error when calling `processImage` with 3 arguments
+- [ ] Show the correct model name (card says "RMBG-2.0" but loads `briaai/RMBG-1.4`; worker progress message hardcodes "RMBG-1.4")
+- [ ] Worker: don't cache a failed model load, so the same model can be retried
+- [ ] Worker: `dispose()` the previous pipeline when switching models (GPU/WASM memory leak)
+- [ ] Worker: type incoming/outgoing messages instead of using `any`
+- [ ] Re-process the current image when the user switches model
+
+### 🟠 P1 — Output quality & performance
+
+- [ ] Export at the original resolution (run the model at ≤1024 px, upscale the mask, apply it to the full-size image)
+- [ ] Use blob URLs (`toBlob` + `createObjectURL`) instead of base64 data URLs; download straight from `ImageData`
+- [ ] Delay `URL.revokeObjectURL` after triggering the download
+- [ ] Try `fp16` on WebGPU instead of `fp32` to reduce model download size
+- [ ] Show approximate model size on each card; don't start a heavy download on a simple card click
+- [ ] Mask editor: throttle the freehand brush with `requestAnimationFrame` and use `willReadFrequently` contexts
+- [ ] Mask editor: reduce undo history memory (currently ~250 MB at 1024² — store masks only, or dirty rectangles)
+
+### 🟡 P2 — Tooling & code quality
+
+- [ ] Type-check on build (`tsc --noEmit && vite build`) and add a `typecheck` script
+- [ ] Add ESLint (`typescript-eslint` + `react-hooks`)
+- [ ] Add Vitest unit tests for `refineMask`, `getScaledSize` and the correction-mask merge
+- [ ] GitHub Action to build and deploy to GitHub Pages
+- [ ] Remove dead code: `ModelStatusBanner.tsx`, `useFloodFill.ts`, unused `threshold` field
+- [ ] Move `MODELS` to `src/config/models.ts` and split `App.tsx` into `Header`, `ModelPicker`, `EditorLayout`, `LoadingOverlay`
+- [ ] Fix inconsistent config: `package.json` `homepage` vs Vite `base`, header GitHub link, `.gitignore` entries for tracked public assets, missing `assets/clearcut-demo.gif`
+
+### 🔵 P3 — UI, accessibility & consistency
+
+- [ ] Fix the `Toaster` setup: it uses `sonner`-style props (`id`, `expand`, `toastOptions`, …) that `sileo` silently ignores
+- [ ] Remove leftovers of the old red theme (error status pill, toast borders, loading overlay shadow) and fix the inverted toast theme
+- [ ] Make the Dropzone readable in light mode
+- [ ] Dropzone: paste image from clipboard (Ctrl+V), toast on non-image files, keyboard accessibility
+- [ ] Mask editor: Pointer Events + `setPointerCapture` for touch/stylus support
+- [ ] Mask editor: zoom & pan, keyboard shortcuts (`[` / `]` brush size, tool switching)
+- [ ] Loading overlay: fix spinner (`animate-spin` overrides inline rotation), allow cancelling, respect `prefers-reduced-motion`
+- [ ] Unify UI language (some strings are in Catalan) or add i18n
+
+### ✨ New features
+
+- [ ] Background replacement (solid colour, blur, custom image)
+- [ ] Additional export formats (WebP, JPEG with background, auto-crop to subject)
+- [ ] Copy result to clipboard
+- [ ] Batch processing with ZIP download
 - [ ] PWA support for fully offline usage
 
 <br />
