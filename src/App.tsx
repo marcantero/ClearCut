@@ -1,44 +1,25 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Toaster, sileo } from 'sileo';
 import { Dropzone } from './components/Dropzone';
 import { ImageCompareSlider } from './components/ImageCompareSlider';
 import { MaskEditorOverlay } from './components/MaskEditorOverlay';
 import {
-  fileToImageData,
-  imageDataToDataUrl,
-  imageDataToPngBlob,
+  canvasToPngBlob,
+  composeFullResolution,
+  downloadBlob,
+  imageDataToCanvas,
+  imageDataToObjectUrl,
+  loadImageFile,
 } from './lib/imageUtils';
+import { detectBackend } from './lib/backend';
+import {
+  DEFAULT_MODEL_ID,
+  MODELS,
+  getDownloadSizeMb,
+  getModelConfig,
+  type Backend,
+} from './config/models';
 import { useBackgroundWorker } from './hooks/useBackgroundWorker';
-
-const MODELS = [
-  {
-    id: 'briaai/RMBG-1.4',
-    name: 'RMBG-1.4',
-    description: 'State-of-the-art accuracy. Best for complex subjects and fine details.',
-    icon: '✨',
-    badge: 'Recommended',
-    color: 'from-cyan-500 to-teal-400',
-    bg: 'bg-cyan-500/10'
-  },
-  {
-    id: 'onnx-community/BiRefNet-ONNX',
-    name: 'BiRefNet',
-    description: 'High fidelity edges and ultra-precise segmentation.',
-    icon: '🎯',
-    badge: 'High Quality',
-    color: 'from-indigo-500 to-purple-400',
-    bg: 'bg-indigo-500/10'
-  },
-  {
-    id: 'Xenova/modnet',
-    name: 'MODNet',
-    description: 'Lightweight, fast, and optimized for smooth performance.',
-    icon: '⚡',
-    badge: 'Fastest',
-    color: 'from-amber-500 to-orange-400',
-    bg: 'bg-amber-500/10'
-  }
-];
 
 function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -68,49 +49,86 @@ function App() {
   }
   }, []);
 
+  /** Object URL of the uploaded file (full resolution), for display. */
   const [originalSrc, setOriginalSrc] = useState<string | null>(null);
-  const [processedSrc, setProcessedSrc] = useState<string | null>(null);
-  const [animationKey, setAnimationKey] = useState<string>('');
-  const [aiResultImageData, setAiResultImageData] = useState<ImageData | null>(null);
+  /** Downscaled copy used for inference and the mask editor. */
   const [originalImageData, setOriginalImageData] = useState<ImageData | null>(null);
-  const [refinedSrc, setRefinedSrc] = useState<string | null>(null);
+  /** Original-resolution copy used to compose the exported PNG. */
+  const fullCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const [aiResultImageData, setAiResultImageData] = useState<ImageData | null>(null);
+  /** Model that produced `aiResultImageData`. */
+  const [resultModelId, setResultModelId] = useState<string | null>(null);
+  /** Latest editor output. Kept in a ref: it changes every frame while painting. */
+  const refinedRef = useRef<ImageData | null>(null);
+  /** Editor output committed when leaving the editor; drives the preview. */
+  const [refinedImageData, setRefinedImageData] = useState<ImageData | null>(null);
+  const [displaySrc, setDisplaySrc] = useState<string | null>(null);
+
+  const [animationKey, setAnimationKey] = useState<string>('');
   const [isEditing, setIsEditing] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<string>(DEFAULT_MODEL_ID);
+  const [backend, setBackend] = useState<Backend | null>(null);
 
   const latestRequestIdRef = useRef<string | null>(null);
+  const latestRequestModelRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    detectBackend().then(setBackend);
+  }, []);
 
   const handleWorkerSuccess = useCallback((id: string, imageData: ImageData) => {
-    const url = imageDataToDataUrl(imageData);
     setAiResultImageData(imageData);
-    setRefinedSrc(null);
+    setResultModelId(latestRequestModelRef.current);
+    refinedRef.current = null;
+    setRefinedImageData(null);
     setIsEditing(false);
-    setProcessedSrc((prev) => { if (prev) URL.revokeObjectURL(prev); return url; });
     setAnimationKey(id);
   }, []);
 
-  const { state, setState, processImage, initModel, activeModelId } = useBackgroundWorker(latestRequestIdRef, handleWorkerSuccess);
+  const { state, setState, processImage } = useBackgroundWorker(latestRequestIdRef, handleWorkerSuccess);
 
+  // Preview URL: encoded asynchronously as a PNG blob (no base64), revoked when replaced.
+  useEffect(() => {
+    const data = refinedImageData ?? aiResultImageData;
+    if (!data) {
+      setDisplaySrc(null);
+      return;
+    }
+    let cancelled = false;
+    let url: string | null = null;
+    imageDataToObjectUrl(data)
+      .then((u) => {
+        if (cancelled) URL.revokeObjectURL(u);
+        else { url = u; setDisplaySrc(u); }
+      })
+      .catch(() => sileo.error({ title: 'Preview error', description: 'Could not render the result.' }));
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [refinedImageData, aiResultImageData]);
 
-  // Default to RMBG-1.4, just like ClearUp defaults to Real-ESRGAN x4+
-  const [selectedModel, setSelectedModel] = useState<string>('briaai/RMBG-1.4');
+  // Release the uploaded file's object URL when it's replaced or on unmount.
+  useEffect(() => () => { if (originalSrc) URL.revokeObjectURL(originalSrc); }, [originalSrc]);
 
   const runProcessing = (imageData: ImageData, modelId: string) => {
     const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     latestRequestIdRef.current = requestId;
-    // The worker loads the model on demand before processing.
+    latestRequestModelRef.current = modelId;
+    // The worker downloads/loads the model on demand before processing.
     processImage(requestId, imageData, modelId);
     setState((prev) => ({ ...prev, processingStatus: 'processing' }));
   };
 
-  const onSelectModel = (modelId: string) => {
-    if (modelId === selectedModel) return;
-    setSelectedModel(modelId);
-    if (originalImageData) {
-      // Re-run the current image with the newly selected model.
-      setIsEditing(false);
-      runProcessing(originalImageData, modelId);
-    } else if (activeModelId !== modelId) {
-      initModel(modelId);
-    }
+  // Selecting a card never starts a download by itself: the model is loaded on the
+  // next upload, or when the user explicitly re-processes the current image.
+  const onSelectModel = (modelId: string) => setSelectedModel(modelId);
+
+  const onReprocess = () => {
+    if (!originalImageData) return;
+    setIsEditing(false);
+    runProcessing(originalImageData, selectedModel);
   };
 
   const onFileSelected = async (file: File) => {
@@ -118,9 +136,16 @@ function App() {
     sileo.info({ title: 'Image loaded', description: 'Analyzing subject…', duration: 2500 });
 
     try {
-      const { imageData, dataUrl } = await fileToImageData(file, 1024);
-      setOriginalSrc(dataUrl); setOriginalImageData(imageData); setProcessedSrc(null);
-      setAnimationKey(''); setIsEditing(false);
+      const { imageData, fullCanvas, objectUrl } = await loadImageFile(file);
+      fullCanvasRef.current = fullCanvas;
+      setOriginalSrc(objectUrl);
+      setOriginalImageData(imageData);
+      setAiResultImageData(null);
+      setResultModelId(null);
+      refinedRef.current = null;
+      setRefinedImageData(null);
+      setAnimationKey('');
+      setIsEditing(false);
       setState((prev) => ({ ...prev, uploadStatus: 'loaded' }));
 
       runProcessing(imageData, selectedModel);
@@ -131,35 +156,38 @@ function App() {
   };
 
   const onDownload = async () => {
-    const srcToDownload = refinedSrc ?? processedSrc;
-    if (!srcToDownload) return;
+    const result = refinedRef.current ?? aiResultImageData;
+    if (!result) return;
     try {
-      const img = await new Promise<HTMLImageElement>((res, rej) => {
-        const image = new Image(); image.onload = () => res(image); image.onerror = rej; image.src = srcToDownload;
+      const canvas = fullCanvasRef.current
+        ? composeFullResolution(fullCanvasRef.current, result)
+        : imageDataToCanvas(result);
+      downloadBlob(await canvasToPngBlob(canvas), 'clearcut-background-removed.png');
+      sileo.success({
+        title: 'Downloaded',
+        description: `PNG saved successfully (${canvas.width}×${canvas.height}).`,
+        duration: 3000,
       });
-      const canvas = document.createElement('canvas'); canvas.width = img.width; canvas.height = img.height;
-      const ctx = canvas.getContext('2d'); if (!ctx) return;
-      ctx.drawImage(img, 0, 0);
-      const blob = await imageDataToPngBlob(ctx.getImageData(0, 0, canvas.width, canvas.height));
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a'); link.href = url; link.download = 'clearcut-background-removed.png'; link.click();
-      URL.revokeObjectURL(url);
-      sileo.success({ title: 'Downloaded', description: 'PNG saved successfully.', duration: 3000 });
     } catch {
       sileo.error({ title: 'Download error', description: 'Failed to save asset.' });
     }
   };
 
   const onRefined = useCallback((refined: ImageData) => {
-    const url = imageDataToDataUrl(refined);
-    setRefinedSrc((prev) => { if (prev) URL.revokeObjectURL(prev); return url; });
-    setProcessedSrc((prev) => { if (prev) URL.revokeObjectURL(prev); return url; });
+    refinedRef.current = refined;
   }, []);
+
+  const onExitEditor = () => {
+    setRefinedImageData(refinedRef.current);
+    setIsEditing(false);
+  };
 
   const isProcessing = state.processingStatus === 'processing';
   const isDone = state.processingStatus === 'done';
-  const displaySrc = refinedSrc ?? processedSrc;
-  const canEdit = !!(originalSrc && displaySrc && aiResultImageData && originalImageData);
+  const canEdit = !!(originalSrc && aiResultImageData && originalImageData);
+  const selectedConfig = getModelConfig(selectedModel);
+  const selectedSizeMb = selectedConfig && backend ? getDownloadSizeMb(selectedConfig, backend) : undefined;
+  const canReprocess = !!originalImageData && !isProcessing && selectedModel !== resultModelId;
 
 	return (
 		<div 
@@ -224,7 +252,7 @@ function App() {
             <span className={`h-1.5 w-1.5 rounded-full ${
               state.modelStatus === 'ready' ? 'bg-emerald-500 dark:bg-emerald-400' : state.modelStatus === 'error' ? 'bg-red-500 dark:bg-red-400' : 'bg-amber-500 dark:bg-amber-400 animate-pulse'
             }`} />
-            {state.modelStatus === 'ready' ? 'On-device AI ready' : state.modelStatus === 'error' ? 'Model error' : state.modelStatus === 'loading' ? 'Loading AI…' : 'No AI selected'}
+            {state.modelStatus === 'ready' ? 'On-device AI ready' : state.modelStatus === 'error' ? 'Model error' : state.modelStatus === 'loading' ? 'Loading AI…' : 'AI loads on first image'}
           </span>
 
           <button
@@ -288,10 +316,10 @@ function App() {
               <div className="h-px bg-slate-100 dark:bg-white/[0.06]" />
 
               <div className="mt-auto flex flex-col gap-2.5">
-                <button type="button" onClick={onDownload} disabled={!displaySrc} className="flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 active:scale-[0.98] disabled:opacity-40">
+                <button type="button" onClick={onDownload} disabled={!aiResultImageData} className="flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 active:scale-[0.98] disabled:opacity-40">
                   Download PNG
                 </button>
-                <button type="button" onClick={() => setIsEditing(false)} className="flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-600 dark:text-slate-400 ring-1 ring-slate-200 dark:ring-white/10 hover:bg-slate-100 dark:hover:bg-white/5 transition">
+                <button type="button" onClick={onExitEditor} className="flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-600 dark:text-slate-400 ring-1 ring-slate-200 dark:ring-white/10 hover:bg-slate-100 dark:hover:bg-white/5 transition">
                   ← Back to preview
                 </button>
               </div>
@@ -335,9 +363,26 @@ function App() {
                   >
                     <span className={`text-sm font-semibold ${selectedModel === model.id ? 'text-cyan-700 dark:text-cyan-400' : 'text-slate-900 dark:text-white'}`}>{model.name}</span>
                     <span className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">{model.description}</span>
+                    {backend && getDownloadSizeMb(model, backend) !== undefined && (
+                      <span className="mt-2 text-[10px] font-medium text-slate-400 dark:text-slate-500">
+                        ~{getDownloadSizeMb(model, backend)} MB download · {backend === 'wasm' ? 'CPU' : 'GPU'}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
+              {canReprocess && selectedConfig && (
+                <button
+                  type="button"
+                  onClick={onReprocess}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 active:scale-[0.98]"
+                >
+                  {resultModelId ? `Re-process with ${selectedConfig.name}` : `Remove background with ${selectedConfig.name}`}
+                  {selectedSizeMb !== undefined && (
+                    <span className="text-[11px] font-medium opacity-70">(~{selectedSizeMb} MB if not cached)</span>
+                  )}
+                </button>
+              )}
             </div>
 
             <section className="rounded-2xl border border-slate-200 dark:border-white/[0.07] bg-white dark:bg-white/[0.03] p-5 shadow-sm dark:shadow-none transition-all">
