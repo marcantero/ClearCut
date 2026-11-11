@@ -159,13 +159,13 @@ Tasks are grouped by priority. Tick them off as they land.
 
 ### 🔴 P0 — Model selector bugs
 
-- [ ] Pass the model id explicitly to `processImage` (first upload failed with "No model selected" due to stale React state)
-- [ ] Fix the type error when calling `processImage` with 3 arguments
-- [ ] Show the correct model name (card says "RMBG-2.0" but loads `briaai/RMBG-1.4`; worker progress message hardcodes "RMBG-1.4")
-- [ ] Worker: don't cache a failed model load, so the same model can be retried
-- [ ] Worker: `dispose()` the previous pipeline when switching models (GPU/WASM memory leak)
-- [ ] Worker: type incoming/outgoing messages instead of using `any`
-- [ ] Re-process the current image when the user switches model
+- [x] Pass the model id explicitly to `processImage` (first upload failed with "No model selected" due to stale React state)
+- [x] Fix the type error when calling `processImage` with 3 arguments
+- [x] Show the correct model name (card says "RMBG-2.0" but loads `briaai/RMBG-1.4`; worker progress message hardcodes "RMBG-1.4")
+- [x] Worker: don't cache a failed model load, so the same model can be retried
+- [x] Worker: `dispose()` the previous pipeline when switching models (GPU/WASM memory leak)
+- [x] Worker: type incoming/outgoing messages instead of using `any`
+- [x] Re-process the current image when the user switches model
 
 ### 🟠 P1 — Output quality & performance
 
