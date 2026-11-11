@@ -33,7 +33,9 @@ export function useBackgroundWorker(
   const [activeModelId, setActiveModelId] = useState<string | null>(null);
 
   const workerRef = useRef<Worker | null>(null);
-  const lastProgressUpdateRef = useRef(0); // <-- CLAU: Evita saturar Sileo
+  const lastProgressUpdateRef = useRef(0);
+  // Bumping this terminates the current worker and starts a fresh one (see cancelModelLoading).
+  const [workerGeneration, setWorkerGeneration] = useState(0);
 
   useEffect(() => {
     const worker = new BackgroundRemoverWorker();
@@ -44,7 +46,7 @@ export function useBackgroundWorker(
 
       if (message.type === 'model-progress') {
         const now = Date.now();
-        // Limitem actualitzacions a un cop cada 150ms
+        // Throttle progress updates to one every 150 ms.
         if (now - lastProgressUpdateRef.current < 150) return;
         lastProgressUpdateRef.current = now;
 
@@ -62,7 +64,7 @@ export function useBackgroundWorker(
       if (message.type === 'status') {
         if (message.status === 'ready') {
           setState((prev) => ({ ...prev, modelStatus: 'ready' }));
-          // Esperem 800ms abans de l'èxit per no ser bruscos
+          // Small delay so the success toast doesn't appear abruptly.
           setTimeout(() => {
             sileo.success({
               title: 'AI model ready',
@@ -120,15 +122,13 @@ export function useBackgroundWorker(
 
     worker.addEventListener('message', handleMessage);
     worker.addEventListener('error', handleError);
-    worker.postMessage({ type: 'reset' } as WorkerIncomingMessage);
-    // worker.postMessage({ type: 'init' } as WorkerIncomingMessage); // Auto-init removed
 
     return () => {
       worker.removeEventListener('message', handleMessage);
       worker.removeEventListener('error', handleError);
       worker.terminate();
     };
-  }, [onSuccess, latestRequestIdRef]);
+  }, [onSuccess, latestRequestIdRef, workerGeneration]);
 
 
 
@@ -146,5 +146,22 @@ export function useBackgroundWorker(
     workerRef.current?.postMessage(message);
   };
 
-  return { state, setState, initModel, processImage, activeModelId };
+  /**
+   * Aborts a model download in progress. Transformers.js can't cancel a download,
+   * so the worker is terminated and replaced; any pending request is dropped.
+   */
+  const cancelModelLoading = () => {
+    latestRequestIdRef.current = null;
+    setActiveModelId(null);
+    setState((prev) => ({
+      ...prev,
+      modelStatus: 'idle',
+      modelProgress: undefined,
+      modelPhase: undefined,
+      processingStatus: 'idle',
+    }));
+    setWorkerGeneration((g) => g + 1);
+  };
+
+  return { state, setState, initModel, processImage, cancelModelLoading, activeModelId };
 }

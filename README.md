@@ -202,13 +202,13 @@ Tasks are grouped by priority. Tick them off as they land.
 ### 🔵 P3 — UI, accessibility & consistency
 
 - [x] Fix the `Toaster` setup: it uses `sonner`-style props (`id`, `expand`, `toastOptions`, …) that `sileo` silently ignores
-- [ ] Remove leftovers of the old red theme (error status pill, toast borders, loading overlay shadow) and fix the inverted toast theme
-- [ ] Make the Dropzone readable in light mode
-- [ ] Dropzone: paste image from clipboard (Ctrl+V), toast on non-image files, keyboard accessibility
-- [ ] Mask editor: Pointer Events + `setPointerCapture` for touch/stylus support
-- [ ] Mask editor: zoom & pan, keyboard shortcuts (`[` / `]` brush size, tool switching)
-- [ ] Loading overlay: fix spinner (`animate-spin` overrides inline rotation), allow cancelling, respect `prefers-reduced-motion`
-- [ ] Unify UI language (some strings are in Catalan) or add i18n
+- [x] Remove leftovers of the old red theme (error status pill, toast borders, loading overlay shadow) (the toast theme was intentionally inverted: sileo's `theme` describes the page)
+- [x] Make the Dropzone readable in light mode
+- [x] Dropzone: paste image from clipboard (Ctrl+V), toast on non-image files, keyboard accessibility
+- [x] Mask editor: Pointer Events + `setPointerCapture` for touch/stylus support
+- [x] Mask editor: zoom & pan, keyboard shortcuts (`[` / `]` brush size, tool switching)
+- [x] Loading overlay: fix spinner (`animate-spin` overrides inline rotation), allow cancelling, respect `prefers-reduced-motion`
+- [x] Unify UI language (some strings are in Catalan) or add i18n
 
 ### ✨ New features
 

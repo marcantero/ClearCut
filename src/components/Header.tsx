@@ -41,23 +41,25 @@ export function Header({ isEditing, modelStatus, theme, onToggleTheme }: HeaderP
 
         <div className="flex items-center gap-2.5">
 
-          <span className={`hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-medium sm:flex ${
+          <span role="status" className={`hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-medium sm:flex ${
             modelStatus === 'ready'
               ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500/20'
               : modelStatus === 'error'
-              ? 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 ring-1 ring-cyan-500/20'
+              ? 'bg-red-500/10 text-red-700 dark:text-red-300 ring-1 ring-red-500/20'
               : 'bg-amber-500/10 text-amber-700 dark:text-amber-300 ring-1 ring-amber-500/20'
           }`}>
             <span className={`h-1.5 w-1.5 rounded-full ${
-              modelStatus === 'ready' ? 'bg-emerald-500 dark:bg-emerald-400' : modelStatus === 'error' ? 'bg-red-500 dark:bg-red-400' : 'bg-amber-500 dark:bg-amber-400 animate-pulse'
+              modelStatus === 'ready' ? 'bg-emerald-500 dark:bg-emerald-400' : modelStatus === 'error' ? 'bg-red-500 dark:bg-red-400' : 'bg-amber-500 dark:bg-amber-400 motion-safe:animate-pulse'
             }`} />
             {modelStatus === 'ready' ? 'On-device AI ready' : modelStatus === 'error' ? 'Model error' : modelStatus === 'loading' ? 'Loading AI…' : 'AI loads on first image'}
           </span>
 
           <button
+            type="button"
             onClick={onToggleTheme}
             className="flex h-7 w-7 items-center justify-center rounded-full text-slate-600 dark:text-slate-400 ring-1 ring-slate-200 dark:ring-white/10 hover:bg-slate-200/60 dark:hover:bg-white/10 transition"
-            aria-label="Canviar tema"
+            aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
           >
             {theme === 'dark' ? (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>

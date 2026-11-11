@@ -13,19 +13,19 @@ export function ImageCompareSlider({
 }: ImageCompareSliderProps) {
   const [isDragging, setIsDragging] = useState(false);
   
-  // 1. Refs pels elements del DOM que animarem manualment
+  // 1. Refs to the DOM elements animated manually
   const containerRef = useRef<HTMLDivElement>(null);
   const clipRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<HTMLDivElement>(null);
   
-  // 2. Ref per guardar la posició sense provocar re-renders
+  // 2. Current position, kept in a ref to avoid re-renders
   const positionRef = useRef(50);
   const frameIdRef = useRef<number | null>(null);
   
-  // 3. Estat només per a l'accessibilitat (s'actualitza un sol cop al final)
+  // 3. State only for accessibility (updated once, at the end of an interaction)
   const [ariaPosition, setAriaPosition] = useState(50);
 
-  // Aquesta funció muta el DOM directament. És ultra-ràpida i Zero-Lag.
+  // Mutates the DOM directly, so dragging doesn't re-render.
   const updatePosition = (value: number) => {
     const clamped = Math.min(100, Math.max(0, value));
     positionRef.current = clamped;
@@ -38,12 +38,19 @@ export function ImageCompareSlider({
     }
   };
 
-  // Animació inicial
+  // Intro animation
   useEffect(() => {
     if (!animationKey) return;
 
     if (frameIdRef.current) {
       cancelAnimationFrame(frameIdRef.current);
+    }
+
+    // Skip the intro sweep when the user prefers reduced motion.
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      updatePosition(50);
+      setAriaPosition(50);
+      return;
     }
 
     updatePosition(5);
@@ -60,7 +67,7 @@ export function ImageCompareSlider({
       if (t < 1) {
         frameIdRef.current = requestAnimationFrame(step);
       } else {
-        // Al final de l'animació, guardem l'estat per al lector de pantalles
+        // At the end, sync the state for screen readers
         setAriaPosition(value); 
       }
     };
@@ -72,14 +79,14 @@ export function ImageCompareSlider({
     };
   }, [animationKey]);
 
-  // Arrossegament amb ratolí/tàctil
+  // Mouse / touch dragging
   useEffect(() => {
     if (!isDragging || !containerRef.current) return;
 
     const container = containerRef.current;
     
-    // 4. OPTIMITZACIÓ: Calculem el BoundingRect només una vegada al principi.
-    // Fer-ho dins del 'pointermove' ralentia molt el navegador.
+    // Measure the rect once at the start of the drag;
+    // doing it on every pointermove was slow.
     let rect = container.getBoundingClientRect();
 
     const handleMove = (e: PointerEvent) => {
@@ -111,10 +118,15 @@ export function ImageCompareSlider({
     };
   }, [isDragging]);
 
-  // Accessibilitat (Teclat)
+  // Keyboard accessibility
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'ArrowLeft') {
       updatePosition(positionRef.current - 5);
+      setAriaPosition(positionRef.current);
+    }
+    if (e.key === 'Home' || e.key === 'End') {
+      e.preventDefault();
+      updatePosition(e.key === 'Home' ? 0 : 100);
       setAriaPosition(positionRef.current);
     }
     if (e.key === 'ArrowRight') {
@@ -131,7 +143,8 @@ export function ImageCompareSlider({
         aria-valuenow={Math.round(ariaPosition)}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-label="Comparació d'imatges abans i després"
+        aria-label="Before and after comparison"
+        aria-valuetext={`${Math.round(ariaPosition)}% showing the result`}
         tabIndex={0}
         onKeyDown={handleKeyDown}
         className="relative overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl cursor-col-resize select-none focus:outline-none focus:ring-2 focus:ring-cyan-400 group transition-transform duration-300 ease-out hover:scale-[1.01] hover:shadow-[0_22px_70px_rgba(15,23,42,0.95)]"
@@ -143,12 +156,12 @@ export function ImageCompareSlider({
       >
         <img
           src={originalSrc}
-          alt="Original abans del procés"
+          alt="Original image"
           className="block w-full h-auto object-contain pointer-events-none transition-transform duration-500 ease-out group-hover:scale-[1.01]"
           draggable={false}
         />
 
-        {/* CONTENIDOR PROCESSADA -> Hi afegim la Ref */}
+        {/* Processed image container */}
         <div
           ref={clipRef}
           className="absolute inset-0 z-10"
@@ -157,22 +170,22 @@ export function ImageCompareSlider({
             backgroundSize: '16px 16px',
             backgroundPosition: '0 0, 8px 8px',
             backgroundColor: '#f9fafb',
-            clipPath: `inset(0 ${100 - positionRef.current}% 0 0)`, // S'inicialitza amb el ref
+            clipPath: `inset(0 ${100 - positionRef.current}% 0 0)`, // Initialised from the ref
           }}
         >
           <img
             src={processedSrc}
-            alt="Processada després del procés"
+            alt="Image with the background removed"
             className="absolute inset-0 w-full h-full object-contain pointer-events-none transition-transform duration-500 ease-out group-hover:scale-[1.01]"
             draggable={false}
           />
         </div>
 
-        {/* SLIDER HANDLE -> Hi afegim la Ref */}
+        {/* Slider handle */}
         <div
           ref={handleRef}
           className="absolute inset-y-0 z-20 flex items-center justify-center w-0.5 bg-white shadow-[0_0_10px_rgba(0,0,0,0.5)]"
-          style={{ left: `${positionRef.current}%` }} // S'inicialitza amb el ref
+          style={{ left: `${positionRef.current}%` }} // Initialised from the ref
         >
           <div className="absolute flex items-center justify-center w-8 h-8 md:w-10 md:h-10 bg-white rounded-full shadow-[0_4px_10px_rgba(0,0,0,0.3)] border border-slate-200 text-slate-600 transition-transform duration-200 ease-out group-hover:scale-110 group-active:scale-95">
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

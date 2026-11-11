@@ -83,7 +83,7 @@ function App() {
     setAnimationKey(id);
   }, []);
 
-  const { state, setState, processImage } = useBackgroundWorker(latestRequestIdRef, handleWorkerSuccess);
+  const { state, setState, processImage, cancelModelLoading } = useBackgroundWorker(latestRequestIdRef, handleWorkerSuccess);
 
   // Preview URL: encoded asynchronously as a PNG blob (no base64), revoked when replaced.
   useEffect(() => {
@@ -170,6 +170,11 @@ function App() {
     }
   };
 
+  const onCancelLoading = useCallback(() => {
+    cancelModelLoading();
+    sileo.info({ title: 'Download cancelled', description: 'Pick another model or try again.', duration: 3000 });
+  }, [cancelModelLoading]);
+
   const onRefined = useCallback((refined: ImageData) => {
     refinedRef.current = refined;
   }, []);
@@ -195,7 +200,7 @@ function App() {
 		{/* Bombolla interactiva (el "blob" del ratolí) */}
 		<div 
 			ref={blobRef}
-			className="pointer-events-none fixed h-96 w-96 rounded-full bg-cyan-500/20 blur-[128px] dark:bg-cyan-500/10 transition-transform duration-500 ease-out will-change-transform"
+			className="pointer-events-none fixed h-96 w-96 motion-reduce:hidden rounded-full bg-cyan-500/20 blur-[128px] dark:bg-cyan-500/10 transition-transform duration-500 ease-out will-change-transform"
 		/>
 		
 		{/* Bombolles orgàniques */}
@@ -262,7 +267,7 @@ function App() {
 				<p className="text-xs font-medium text-slate-500 dark:text-slate-400">
 					{isProcessing ? (
 					<span className="inline-flex items-center gap-2">
-						<span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-500 dark:bg-cyan-400" />
+						<span className="inline-block h-1.5 w-1.5 motion-safe:animate-pulse rounded-full bg-cyan-500 dark:bg-cyan-400" />
 						Removing background…
 					</span>
 					) : null}
@@ -289,7 +294,7 @@ function App() {
                 ) : (
                   <div className="flex h-56 items-center justify-center rounded-2xl border border-slate-200 dark:border-white/[0.06] bg-slate-100 dark:bg-white/[0.02]">
                     <div className="flex flex-col items-center gap-2">
-                      <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-cyan-500 dark:bg-cyan-400" />
+                      <span className="inline-block h-2 w-2 motion-safe:animate-pulse rounded-full bg-cyan-500 dark:bg-cyan-400" />
                       <span className="text-[11px] text-slate-500">Processing…</span>
                     </div>
                   </div>
@@ -315,7 +320,9 @@ function App() {
         )}
       </main>
       
-      {/* sileo's Toaster only supports position, offset, theme and default options. */}
+      {/* sileo's Toaster only supports position, offset, theme and default options.
+          Its `theme` describes the page and the toast takes the opposite fill
+          ('light' → dark toast), so it's inverted on purpose: toasts match the page. */}
       <Toaster
         position="bottom-left"
         offset={20}
@@ -324,7 +331,7 @@ function App() {
       />
 
       {state.modelStatus === 'loading' && (
-        <LoadingOverlay progress={state.modelProgress} phase={state.modelPhase} />
+        <LoadingOverlay progress={state.modelProgress} phase={state.modelPhase} onCancel={onCancelLoading} />
       )}
     </div>
   );

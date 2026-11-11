@@ -38,12 +38,35 @@ export function EditorLayout({
             { icon: '⚡', text: 'Smart brush auto-selects by colour similarity' },
             { icon: '🎯', text: 'Lower tolerance = more precise edges' },
             { icon: '↕', text: 'Adjust brush size for fine vs. broad strokes' },
+            { icon: '🔍', text: 'Zoom in to fix fine edges like hair' },
           ].map(({ icon, text }) => (
             <div key={text} className="flex items-start gap-2.5">
-              <span className="mt-px text-sm leading-none">{icon}</span>
+              <span className="mt-px text-sm leading-none" aria-hidden="true">{icon}</span>
               <p className="text-[11px] leading-relaxed text-slate-500">{text}</p>
             </div>
           ))}
+        </div>
+
+        <div className="h-px bg-slate-100 dark:bg-white/[0.06]" />
+
+        <div className="space-y-2">
+          <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400 dark:text-slate-600">Shortcuts</p>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-[11px] text-slate-500">
+            {[
+              ['B / S', 'Brush / Smart brush'],
+              ['R / E / X', 'Restore / Erase / Swap'],
+              ['[ / ]', 'Smaller / bigger brush'],
+              ['Scroll, + / −', 'Zoom'],
+              ['Space, H', 'Pan (drag)'],
+              ['0', 'Fit to screen'],
+              ['Ctrl+Z / Ctrl+Shift+Z', 'Undo / Redo'],
+            ].map(([keys, action]) => (
+              <div key={keys} className="contents">
+                <dt><kbd className="whitespace-nowrap rounded border border-slate-200 bg-slate-50 px-1 font-sans text-[10px] text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300">{keys}</kbd></dt>
+                <dd>{action}</dd>
+              </div>
+            ))}
+          </dl>
         </div>
 
         <div className="h-px bg-slate-100 dark:bg-white/[0.06]" />
